@@ -17,6 +17,10 @@ import firebase_admin
 from firebase_admin import credentials, messaging
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://resqmesh:resqmesh_demo@localhost:5432/resqmesh")
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+    if "?" not in DATABASE_URL:
+        DATABASE_URL += "?sslmode=require"
 SECRET = os.getenv("JWT_SECRET", "replace-this-demo-secret-before-deployment")
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 Session = sessionmaker(engine)
