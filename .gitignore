@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+.next/
+out/
+
+# Secrets and Keys
+*.json
+!package.json
+!tsconfig.json
+!drizzle.config.json
+.env
+*.log
+
+# Android
+.gradle/
+build/
+*.apk
+
+# OS files
+.DS_Store
+.idea/

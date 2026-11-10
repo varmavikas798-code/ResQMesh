@@ -1,0 +1,33 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: resqmesh
+      POSTGRES_USER: resqmesh
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-resqmesh_demo}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - resqmesh_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U resqmesh -d resqmesh"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://resqmesh:${POSTGRES_PASSWORD:-resqmesh_demo}@db:5432/resqmesh
+      JWT_SECRET: ${JWT_SECRET:-resqmesh-local-demo-secret-change-before-deployment}
+      DEMO_OTP: ${DEMO_OTP:-123456}
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  resqmesh_data:

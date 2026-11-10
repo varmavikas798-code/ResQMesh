@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ResQNet logo: red shield + heartbeat pulse + signal waves. Used across the whole app. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="120"
+    android:viewportHeight="120">
+    <path
+        android:fillColor="#E8634E"
+        android:pathData="M48,22 L12,34 L12,62 C12,84 28,98 48,106 Z" />
+    <path
+        android:fillColor="#C93C3C"
+        android:pathData="M48,22 L84,34 L84,62 C84,84 68,98 48,106 Z" />
+    <path
+        android:pathData="M20,62 L37,62 L44,42 L53,82 L59,54 L63,62 L76,62"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M84,20 A14,14 0 0 1 98,34"
+        android:strokeColor="#D2453F"
+        android:strokeWidth="5"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M84,8 A26,26 0 0 1 110,34"
+        android:strokeColor="#D2453F"
+        android:strokeWidth="5"
+        android:strokeLineCap="round" />
+</vector>
