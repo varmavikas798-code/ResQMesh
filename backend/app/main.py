@@ -22,10 +22,19 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 Session = sessionmaker(engine)
 pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+import base64
+
 # Firebase Initialization
 try:
-    cred = credentials.Certificate("/Users/vikasvarma/Downloads/resqmesh-af979-firebase-adminsdk-fbsvc-16be637e66.json")
-    firebase_admin.initialize_app(cred)
+    _b64 = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+    if _b64:
+        cred = credentials.Certificate(json.loads(base64.b64decode(_b64)))
+        firebase_admin.initialize_app(cred)
+    elif os.path.exists(os.getenv("FIREBASE_KEY_PATH", "")):
+        cred = credentials.Certificate(os.getenv("FIREBASE_KEY_PATH"))
+        firebase_admin.initialize_app(cred)
+    else:
+        print("Firebase not configured (no key found) - push disabled")
 except Exception as e:
     print(f"Firebase init failed: {e}")
 
