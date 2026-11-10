@@ -111,8 +111,10 @@ object ResQApi {
     ): JSONObject = withContext(Dispatchers.IO) {
         val connection = (URL("$BASE_URL$path").openConnection() as HttpURLConnection).apply {
             requestMethod = method
-            connectTimeout = 5_000
-            readTimeout = 8_000
+            // Free-tier hosting (Render) sleeps after inactivity and can take 30-60s
+            // to wake. Longer timeouts let the first call survive the cold start.
+            connectTimeout = 20_000
+            readTimeout = 45_000
             doOutput = method !in setOf("GET", "HEAD")
             setRequestProperty("Content-Type", "application/json")
             token?.let { setRequestProperty("Authorization", "Bearer $it") }
