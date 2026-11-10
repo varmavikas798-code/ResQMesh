@@ -2,6 +2,7 @@ package com.resqnet.app.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -57,6 +58,17 @@ object ResQApi {
         )
     }
 
+    /** Live list of available responders within 3 km of the given point. */
+    suspend fun nearbyResponders(token: String, latitude: Double, longitude: Double): JSONArray {
+        val body = rawRequest(
+            "GET",
+            "/responders/nearby?lat=$latitude&lon=$longitude",
+            JSONObject(),
+            token
+        )
+        return if (body.isBlank()) JSONArray() else JSONArray(body)
+    }
+
     suspend fun createSos(token: String, latitude: Double, longitude: Double): String {
         val result = request(
             "POST", "/sos",
@@ -108,7 +120,17 @@ object ResQApi {
         path: String,
         payload: JSONObject,
         token: String? = null
-    ): JSONObject = withContext(Dispatchers.IO) {
+    ): JSONObject {
+        val body = rawRequest(method, path, payload, token)
+        return if (body.isBlank()) JSONObject() else JSONObject(body)
+    }
+
+    private suspend fun rawRequest(
+        method: String,
+        path: String,
+        payload: JSONObject,
+        token: String? = null
+    ): String = withContext(Dispatchers.IO) {
         val connection = (URL("$BASE_URL$path").openConnection() as HttpURLConnection).apply {
             requestMethod = method
             // Free-tier hosting (Render) sleeps after inactivity and can take 30-60s
@@ -131,7 +153,7 @@ object ResQApi {
                 val detail = runCatching { JSONObject(body).optString("detail") }.getOrNull()
                 throw ResQApiException(status, detail?.takeIf(String::isNotBlank) ?: "Server returned HTTP $status")
             }
-            if (body.isBlank()) JSONObject() else JSONObject(body)
+            body
         } finally {
             connection.disconnect()
         }

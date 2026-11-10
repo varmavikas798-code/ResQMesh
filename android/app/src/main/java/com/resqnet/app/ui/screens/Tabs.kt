@@ -26,6 +26,9 @@ import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -35,6 +38,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.resqnet.app.data.ResQApi
 import com.resqnet.app.data.User
 import com.resqnet.app.ui.theme.BlueBg
 import com.resqnet.app.ui.theme.BlueText
@@ -56,15 +60,53 @@ private data class Responder(
     val fg: Color
 )
 
-private val responders = listOf(
-    Responder("PS", "Dr. Priya Sharma", "Doctor", "1.2 km away", Color(0xFFDDF6E6), Color(0xFF1F7A4A)),
-    Responder("NA", "Nurse Anjali", "Nurse", "1.8 km away", Color(0xFFE0E9FF), Color(0xFF2A4FC4)),
-    Responder("RK", "Rohit Kumar", "CPR Volunteer", "2.1 km", Color(0xFFF1E4FF), Color(0xFF6A2BC4)),
-    Responder("AM", "Arjun Mehta", "Paramedic", "2.7 km", Color(0xFFFFEFD9), Color(0xFFB36A0F))
+private val responderPalette = listOf(
+    Color(0xFFDDF6E6) to Color(0xFF1F7A4A),
+    Color(0xFFE0E9FF) to Color(0xFF2A4FC4),
+    Color(0xFFF1E4FF) to Color(0xFF6A2BC4),
+    Color(0xFFFFEFD9) to Color(0xFFB36A0F)
 )
 
 @Composable
-fun RespondersTab() {
+fun RespondersTab(authToken: String?, location: android.location.Location?) {
+    var responders by remember { mutableStateOf<List<Responder>?>(null) }
+    var statusMessage by remember { mutableStateOf("") }
+
+    LaunchedEffect(location?.latitude, location?.longitude, authToken) {
+        val token = authToken
+        val lat = location?.latitude
+        val lon = location?.longitude
+        if (token == null || lat == null || lon == null) {
+            statusMessage = "Allow location access and stay signed in to see live responders nearby."
+            responders = emptyList()
+            return@LaunchedEffect
+        }
+        responders = null
+        statusMessage = "Loading live responders…"
+        try {
+            val array = ResQApi.nearbyResponders(token, lat, lon)
+            responders = List(array.length()) { index ->
+                val row = array.getJSONObject(index)
+                val name = row.optString("name", "Responder")
+                val initials = name.trim().split(" ").filter { it.isNotBlank() }
+                    .take(2).joinToString("") { it.first().uppercase() }.ifBlank { "R" }
+                val (bg, fg) = responderPalette[index % responderPalette.size]
+                Responder(
+                    initials = initials,
+                    name = name,
+                    role = row.optString("qualification", "Responder"),
+                    distance = "${row.optDouble("distance_km", 0.0)} km away",
+                    bg = bg,
+                    fg = fg
+                )
+            }
+            statusMessage = ""
+        } catch (error: Exception) {
+            responders = emptyList()
+            statusMessage = "Could not load responders: ${error.message ?: "server busy, try again"}"
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("Nearby Responders") {
             Chip("Within 3 km", RedLight, Red, Color(0xFFF8D5DA))
@@ -89,23 +131,42 @@ fun RespondersTab() {
                 }
             }
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                responders.forEach { r ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Mist, RoundedCornerShape(18.dp))
-                            .border(1.dp, Line, RoundedCornerShape(18.dp))
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Avatar(r.initials, 48.dp, r.bg, r.fg, 16)
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(r.name, color = Navy, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                            Text("${r.role} • ${r.distance}", color = Slate, fontSize = 14.sp)
-                        }
-                        Chip("Available", GreenBg, GreenText)
+                when {
+                    responders == null -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("📡", fontSize = 22.sp)
+                        Spacer(Modifier.width(10.dp))
+                        Text(statusMessage, color = Slate, fontSize = 15.sp)
                     }
+                    responders!!.isEmpty() -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🌐", fontSize = 22.sp)
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            statusMessage.ifBlank { "No responders within 3 km right now. They appear here automatically once someone registers nearby." },
+                            color = Slate,
+                            fontSize = 15.sp
+                        )
+                    }
+                    else -> responders!!.forEach { r ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Mist, RoundedCornerShape(18.dp))
+                                .border(1.dp, Line, RoundedCornerShape(18.dp))
+                                .padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Avatar(r.initials, 48.dp, r.bg, r.fg, 16)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(r.name, color = Navy, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                                Text("${r.role} • ${r.distance}", color = Slate, fontSize = 14.sp)
+                            }
+                            Chip("Available", GreenBg, GreenText)
+                        }
+                    }
+                }
+                if (statusMessage.isNotBlank() && !responders.isNullOrEmpty()) {
+                    Text(statusMessage, color = Slate, fontSize = 13.sp)
                 }
             }
         }

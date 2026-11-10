@@ -182,7 +182,7 @@ fun MainScreen(
                     onLocationChanged = { currentLocation = it },
                     onSosSent = { history.add(0, it) }
                 )
-                Tab.Responders -> RespondersTab()
+                Tab.Responders -> RespondersTab(authToken = authToken, location = currentLocation)
                 Tab.History -> HistoryTab(history)
                 Tab.Profile -> ProfileTab(user, currentLocation, onLogout)
             }
