@@ -1,6 +1,5 @@
 package com.resqnet.app.data
 
-import android.os.Build
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -12,17 +11,7 @@ data class AuthSession(val token: String, val user: User)
 class ResQApiException(val statusCode: Int, message: String) : IllegalStateException(message)
 
 object ResQApi {
-    // Phones on the current Wi-Fi use the laptop's LAN address. The emulator uses
-    // its host bridge so local Android Studio runs continue to work as well.
-    private const val PHONE_API_URL = "http://192.168.29.40:8000"
-    private const val EMULATOR_API_URL = "http://10.0.2.2:8000"
-    private val BASE_URL = if (
-        Build.FINGERPRINT.contains("generic", ignoreCase = true) ||
-        Build.MODEL.contains("emulator", ignoreCase = true) ||
-        Build.MODEL.startsWith("sdk_gphone", ignoreCase = true) ||
-        Build.HARDWARE.contains("ranchu", ignoreCase = true) ||
-        Build.HARDWARE.contains("goldfish", ignoreCase = true)
-    ) EMULATOR_API_URL else PHONE_API_URL
+    private const val BASE_URL = "https://resqmesh-api-3g1c.onrender.com"
 
     suspend fun register(user: User): String {
         val apiPassword = bcryptCompatiblePassword(user.password)
