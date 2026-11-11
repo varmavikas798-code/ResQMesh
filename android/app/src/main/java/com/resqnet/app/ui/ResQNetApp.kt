@@ -18,7 +18,10 @@ import com.resqnet.app.ui.screens.MainScreen
 import com.resqnet.app.ui.screens.OtpScreen
 import com.resqnet.app.ui.screens.RegisterScreen
 import com.resqnet.app.ui.screens.SplashScreen
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 private enum class Screen { Splash, Login, Register, Otp, Main }
 
@@ -35,18 +38,22 @@ fun ResQNetApp() {
     var authBusy by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
 
-    fun syncFcmToken(token: String) {
-        com.google.firebase.messaging.FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-            if (task.isSuccessful) {
-                val fcmToken = task.result
-                if (!fcmToken.isNullOrBlank()) {
-                    store.saveFcmToken(fcmToken)
-                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                        try {
-                            ResQApi.updateFcmToken(fcmToken, token)
-                        } catch (_: Exception) {}
-                    }
-                }
+    // Push readiness must survive a sleeping free-tier server: read the FCM
+    // token locally first, then retry the upload a few times with backoff.
+    suspend fun syncFcmToken(token: String) {
+        val fcmToken = suspendCoroutine { cont ->
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+                cont.resume(if (task.isSuccessful) task.result else null)
+            }
+        } ?: return
+        if (fcmToken.isBlank()) return
+        store.saveFcmToken(fcmToken)
+        repeat(4) {
+            try {
+                ResQApi.updateFcmToken(fcmToken, token)
+                return
+            } catch (_: Exception) {
+                delay(8_000)
             }
         }
     }
@@ -59,7 +66,7 @@ fun ResQNetApp() {
         user = safeUser
         authToken = session.token
         authError = null
-        syncFcmToken(session.token)
+        scope.launch { syncFcmToken(session.token) }
         screen = Screen.Main
     }
 
@@ -97,6 +104,12 @@ fun ResQNetApp() {
                 }
             } catch (error: Exception) {
                 authError = "Account sync failed: ${error.message ?: "Check the backend connection and retry."}"
+                // Even if the session check failed (e.g. a sleeping server), keep
+                // trying to make this device push-ready for future alerts.
+                val retryToken = store.getAuthToken()
+                if (retryToken != null) {
+                    runCatching { syncFcmToken(retryToken) }
+                }
             } finally {
                 authBusy = false
             }
