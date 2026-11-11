@@ -41,21 +41,32 @@ fun ResQNetApp() {
     // Push readiness must survive a sleeping free-tier server: read the FCM
     // token locally first, then retry the upload a few times with backoff.
     suspend fun syncFcmToken(token: String) {
-        val fcmToken = suspendCoroutine { cont ->
+        val tag = "ResQPush"
+        android.util.Log.w(tag, "syncFcmToken: starting")
+        val fcmToken = suspendCoroutine<String?> { cont ->
             com.google.firebase.messaging.FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-                cont.resume(if (task.isSuccessful) task.result else null)
+                if (task.isSuccessful) {
+                    android.util.Log.w(tag, "syncFcmToken: got FCM token (${task.result.take(12)}…)")
+                    cont.resume(task.result)
+                } else {
+                    android.util.Log.w(tag, "syncFcmToken: FAILED to get FCM token", task.exception)
+                    cont.resume(null)
+                }
             }
         } ?: return
         if (fcmToken.isBlank()) return
         store.saveFcmToken(fcmToken)
-        repeat(4) {
+        repeat(4) { attempt ->
             try {
                 ResQApi.updateFcmToken(fcmToken, token)
+                android.util.Log.w(tag, "syncFcmToken: uploaded on attempt ${attempt + 1}")
                 return
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                android.util.Log.w(tag, "syncFcmToken: upload attempt ${attempt + 1} failed: ${error.message}")
                 delay(8_000)
             }
         }
+        android.util.Log.w(tag, "syncFcmToken: all 4 upload attempts failed")
     }
 
     fun saveSession(session: AuthSession) {
