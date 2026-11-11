@@ -62,4 +62,7 @@ dependencies {
     // Firebase BoM & Messaging
     implementation(platform("com.google.firebase:firebase-bom:33.3.0"))
     implementation("com.google.firebase:firebase-messaging-ktx")
+
+    // Fused location (Wi-Fi/cell + GPS fallback for reliable indoor fixes)
+    implementation("com.google.android.gms:play-services-location:21.3.0")
 }

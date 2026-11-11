@@ -4,16 +4,16 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Location
-import android.location.LocationManager
-import android.location.LocationListener
 import android.os.Build
-import android.os.CancellationSignal
 import android.os.Handler
 import android.os.Looper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -89,7 +89,6 @@ import com.resqnet.app.ui.theme.Slate
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.Executor
 import kotlinx.coroutines.launch
 
 data class AlertRecord(val title: String, val location: String, val time: String, val status: String)
@@ -103,40 +102,35 @@ private enum class Tab(val label: String, val icon: ImageVector) {
 
 @Suppress("MissingPermission")
 private fun fetchCurrentLocation(context: Context, onResult: (Location?) -> Unit) {
-    val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-    val provider = when {
-        manager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
-        manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
-        else -> null
-    }
-    if (provider == null) {
-        onResult(null)
-        return
+    val fused = LocationServices.getFusedLocationProviderClient(context)
+    val handler = Handler(Looper.getMainLooper())
+    var delivered = false
+
+    fun deliver(result: Location?) {
+        if (delivered) return
+        delivered = true
+        onResult(result)
     }
 
-    fun lastKnownLocation(): Location? = runCatching { manager.getLastKnownLocation(provider) }.getOrNull()
+    // Safety net: if the fused provider stalls (rare), fall back to the last
+    // cached fix after a short wait so the UI never spins forever.
+    handler.postDelayed({ deliver(null) }, 12_000)
 
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        val cancellation = CancellationSignal()
-        val handler = Handler(Looper.getMainLooper())
-        val timeout = Runnable { cancellation.cancel(); onResult(lastKnownLocation()) }
-        handler.postDelayed(timeout, 15_000)
-        manager.getCurrentLocation(provider, cancellation, Executor { command -> handler.post(command) }) { result ->
-            handler.removeCallbacks(timeout)
-            onResult(result ?: lastKnownLocation())
+    // First try a fresh high-accuracy fix; if that yields nothing, use the
+    // last known fix (the fused provider blends GPS with Wi-Fi/cell so it
+    // usually succeeds even indoors).
+    fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, CancellationTokenSource().token)
+        .addOnSuccessListener { fresh ->
+            if (fresh != null) deliver(fresh)
+            else fused.lastLocation
+                .addOnSuccessListener { cached -> deliver(cached) }
+                .addOnFailureListener { deliver(null) }
         }
-    } else {
-        val listener = object : LocationListener {
-            override fun onLocationChanged(result: Location) {
-                manager.removeUpdates(this)
-                onResult(result)
-            }
+        .addOnFailureListener {
+            fused.lastLocation
+                .addOnSuccessListener { cached -> deliver(cached) }
+                .addOnFailureListener { deliver(null) }
         }
-        val handler = Handler(Looper.getMainLooper())
-        val timeout = Runnable { manager.removeUpdates(listener); onResult(lastKnownLocation()) }
-        handler.postDelayed(timeout, 15_000)
-        manager.requestSingleUpdate(provider, listener, Looper.getMainLooper())
-    }
 }
 
 @Composable
