@@ -79,7 +79,9 @@ object ResQApi {
             token
         )
         val notified = result.optInt("responders_notified", 0)
-        return "SOS saved by the server. Nearby responders found: $notified. Push/SMS delivery is not configured yet."
+        val delivery = result.optString("delivery").takeIf { it.isNotBlank() }
+            ?: "Delivery status unknown"
+        return "SOS saved by the server. Nearby responders found: $notified. $delivery."
     }
 
     suspend fun updateFcmToken(token: String, authToken: String) {
