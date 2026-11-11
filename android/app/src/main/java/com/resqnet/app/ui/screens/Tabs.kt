@@ -23,8 +23,10 @@ import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +40,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.Intent
+import android.provider.Settings
+import androidx.compose.ui.platform.LocalContext
 import com.resqnet.app.data.ResQApi
 import com.resqnet.app.data.User
 import com.resqnet.app.ui.theme.BlueBg
@@ -212,6 +217,8 @@ fun HistoryTab(history: List<AlertRecord>) {
 
 @Composable
 fun ProfileTab(user: User, location: android.location.Location?, onLogout: () -> Unit) {
+    val context = LocalContext.current
+    var showAbout by remember { mutableStateOf(false) }
     val initials = user.name.trim().split(" ").filter { it.isNotBlank() }
         .take(2).joinToString("") { it.first().uppercase() }.ifBlank { "R" }
 
@@ -273,9 +280,14 @@ fun ProfileTab(user: User, location: android.location.Location?, onLogout: () ->
             }
 
             Spacer(Modifier.height(20.dp))
-            SettingsRow("Notification Settings")
+            SettingsRow("Notification Settings") {
+                val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                runCatching { context.startActivity(intent) }
+                    .getOrElse { context.startActivity(Intent(Settings.ACTION_SETTINGS)) }
+            }
             Spacer(Modifier.height(8.dp))
-            SettingsRow("About ResQNet")
+            SettingsRow("About ResQNet") { showAbout = true }
             Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier
@@ -290,6 +302,7 @@ fun ProfileTab(user: User, location: android.location.Location?, onLogout: () ->
             }
         }
     }
+    if (showAbout) AboutDialog { showAbout = false }
 }
 
 @Composable
@@ -310,15 +323,37 @@ private fun InfoRow(label: String, value: @Composable () -> Unit) {
 }
 
 @Composable
-private fun SettingsRow(label: String) {
+private fun SettingsRow(label: String, onClick: (() -> Unit)? = null) {
     Row(
         modifier = Modifier
-            .fillMaxWidth()
             .background(Mist, RoundedCornerShape(16.dp))
+            .clickable(enabled = onClick != null) { onClick?.invoke() }
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(label, color = Navy, fontSize = 17.sp, modifier = Modifier.weight(1f))
         Icon(Icons.Outlined.ChevronRight, null, tint = Slate)
     }
+}
+
+@Composable
+private fun AboutDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("ResQNet (ResQMesh)", color = Navy, fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                Text("Emergency response at your fingertips.", color = Navy, fontWeight = FontWeight.Medium, fontSize = 15.sp)
+                Spacer(Modifier.height(10.dp))
+                Text("When someone sends an SOS, ResQNet alerts trained responders nearby — doctors, nurses, paramedics and CPR volunteers — using every connection available:", color = Slate, fontSize = 14.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("🌐 Internet → instant push alerts via the ResQMesh server\n📱 Mobile signal → direct SMS to responders\n🔵 No signal → Bluetooth mesh hops the SOS phone-to-phone", color = Slate, fontSize = 14.sp)
+                Spacer(Modifier.height(10.dp))
+                Text("Version 1.0", color = Slate, fontSize = 12.sp)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Got it", color = Red, fontWeight = FontWeight.Bold) }
+        }
+    )
 }
