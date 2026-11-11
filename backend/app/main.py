@@ -67,6 +67,9 @@ class Location(BaseModel):
 class Availability(BaseModel):
     available: bool
 
+class FcmToken(BaseModel):
+    fcm_token: str
+
 class SOS(Location):
     message: str = Field(default="Emergency assistance needed", max_length=500)
 
@@ -164,7 +167,10 @@ def set_availability(body: Availability, user=Depends(current_user)):
     return {"ok":True,"available":body.available}
 
 @app.put("/fcm/token")
-def update_fcm_token(token: str = Header(None), user=Depends(current_user)):
+def update_fcm_token(body: FcmToken | None = None, legacy: str | None = Header(default=None, alias="token"), user=Depends(current_user)):
+    # The Android app posts the device token in the JSON body; some older
+    # integrations used a raw header. Accept both so token sync never fails.
+    token = (body.fcm_token if body else None) or legacy
     if not token: raise HTTPException(400, "Token missing")
     with db() as s:
         s.execute(text("UPDATE users SET fcm_token=:t WHERE id=:id"), {"t": token, "id": user["id"]})
@@ -225,6 +231,7 @@ def dashboard_responders():
     # is optional: a newly registered responder should still appear before GPS is
     # granted, while nearby matching continues to require a real saved location.
     with db() as s: rows=s.execute(text("""SELECT id,name,email,phone,qualification,available,
+      (fcm_token IS NOT NULL AND fcm_token <> '') push_ready,
       ST_Y(location::geometry) latitude,ST_X(location::geometry) longitude
       FROM users WHERE verified ORDER BY created_at DESC""")).mappings().all()
     return [dict(x) for x in rows]
