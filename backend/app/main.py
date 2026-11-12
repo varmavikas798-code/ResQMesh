@@ -185,7 +185,7 @@ def nearby(lat: float, lon: float, radius_m: int=3000, user=Depends(current_user
           AND ST_DWithin(location,ST_SetSRID(ST_MakePoint(:lon,:lat),4326)::geography,:radius) ORDER BY location <-> ST_SetSRID(ST_MakePoint(:lon,:lat),4326)::geography"""), {"lon":lon,"lat":lat,"radius":min(radius_m,10000),"uid":user["id"]}).mappings().all()
     return [dict(x) for x in rows]
 
-def send_push_notification(token: str, title: str, body: str):
+def send_push_notification(token: str, title: str, body: str) -> str:
     try:
         message = messaging.Message(
             notification=messaging.Notification(title=title, body=body),
@@ -193,8 +193,10 @@ def send_push_notification(token: str, title: str, body: str):
             android=messaging.AndroidConfig(priority='high')
         )
         messaging.send(message)
+        return "sent"
     except Exception as e:
-        print(f"Failed to send push to {token}: {e}")
+        print(f"Failed to send push to {str(token)[:12]}...: {e}")
+        return f"failed: {e}"
 
 @app.post("/sos")
 def create_sos(body: SOS, user=Depends(current_user)):
@@ -207,15 +209,16 @@ def create_sos(body: SOS, user=Depends(current_user)):
           AND ST_DWithin(location,ST_SetSRID(ST_MakePoint(:lon,:lat),4326)::geography,3000) ORDER BY location <-> ST_SetSRID(ST_MakePoint(:lon,:lat),4326)::geography"""), {"uid":user["id"],"lon":body.longitude,"lat":body.latitude}).mappings().all()
     
     # Trigger Instant Push Notifications to all nearby responders
+    push_results = {}
     for r in responders:
         if r.get("fcm_token"):
-            send_push_notification(
-                r["fcm_token"], 
-                "🚨 EMERGENCY SOS!", 
+            push_results[str(r.get("name", r["id"]))] = send_push_notification(
+                r["fcm_token"],
+                "🚨 EMERGENCY SOS!",
                 f"Urgent help needed {r['distance_km']}km away! {body.message}"
             )
-            
-    return {"id":str(aid),"status":"active","created_at":datetime.now(timezone.utc).isoformat(),"responders_notified":len(responders),"responders":[dict(x) for x in responders],"delivery":"Push notifications sent via Firebase"}
+
+    return {"id":str(aid),"status":"active","created_at":datetime.now(timezone.utc).isoformat(),"responders_notified":len(responders),"responders":[dict(x) for x in responders],"push_results":push_results,"delivery":"Push notifications via Firebase"}
 
 @app.get("/dashboard/alerts")
 def dashboard_alerts(limit: int=100):
