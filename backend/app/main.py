@@ -187,8 +187,10 @@ def nearby(lat: float, lon: float, radius_m: int=3000, user=Depends(current_user
 
 def send_push_notification(token: str, title: str, body: str) -> str:
     try:
+        # Data-only message: the Android app's ResQFirebaseMessagingService
+        # receives it in ALL app states and renders the full-screen alarm.
         message = messaging.Message(
-            notification=messaging.Notification(title=title, body=body),
+            data={"title": title, "body": body, "type": "sos"},
             token=token,
             android=messaging.AndroidConfig(priority='high')
         )
