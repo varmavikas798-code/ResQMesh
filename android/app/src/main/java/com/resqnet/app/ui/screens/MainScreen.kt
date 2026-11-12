@@ -14,6 +14,7 @@ import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -63,14 +64,17 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.resqnet.app.data.SosResponder
 import com.resqnet.app.data.User
 import com.resqnet.app.data.ResQApi
 import com.resqnet.app.ui.components.LogoBadge
@@ -273,6 +277,7 @@ private fun HomeTab(
     var showSent by remember { mutableStateOf(false) }
     var sendingSos by remember { mutableStateOf(false) }
     var sosMessage by remember { mutableStateOf("") }
+    var sosResponders by remember { mutableStateOf<List<SosResponder>>(emptyList()) }
     var sosSucceeded by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val firstName = user.name.trim().substringBefore(" ").ifBlank { "there" }
@@ -413,13 +418,16 @@ private fun HomeTab(
                             try {
                                 if (current == null) throw IllegalStateException("Location is no longer available. Refresh it and try again.")
                                 val token = authToken ?: throw IllegalStateException("Account is still syncing. Try again in a moment.")
-                                sosMessage = ResQApi.createSos(token, current.latitude, current.longitude)
+                                val sosResult = ResQApi.createSos(token, current.latitude, current.longitude)
+                                sosResponders = sosResult.responders
+                                sosMessage = "Nearby responders found: ${sosResult.notified}. ${sosResult.delivery}."
                                 sosSucceeded = true
                                 val time = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date())
                                 val coordinates = "%.5f, %.5f".format(Locale.US, current.latitude, current.longitude)
                                 onSosSent(AlertRecord("SOS request", coordinates, time, "Saved to server"))
                             } catch (error: Exception) {
                                 sosSucceeded = false
+                                sosResponders = emptyList()
                                 sosMessage = error.message ?: "Couldn't reach the ResQMesh server."
                             } finally {
                                 sendingSos = false
@@ -439,7 +447,73 @@ private fun HomeTab(
             onDismissRequest = { showSent = false },
             containerColor = Color.White,
             title = { Text(if (sosSucceeded) "SOS request received" else "SOS request failed", color = if (sosSucceeded) GreenText else Red, fontWeight = FontWeight.Bold) },
-            text = { Text(sosMessage, color = Slate) },
+            text = {
+                Column {
+                    Text(sosMessage, color = Slate)
+                    if (sosSucceeded && sosResponders.isNotEmpty()) {
+                        Spacer(Modifier.height(12.dp))
+                        Text("RESPONDER RADAR — 3 KM RANGE", color = Slate, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Spacer(Modifier.height(8.dp))
+                        Canvas(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(190.dp)
+                                .background(Color(0xFFF2F4F9), RoundedCornerShape(14.dp))
+                        ) {
+                            val center = Offset(size.width / 2, size.height / 2)
+                            val radarRadius = size.minDimension / 2 - 12.dp.toPx()
+                            drawCircle(Red.copy(alpha = 0.07f), radarRadius, center)
+                            drawCircle(Red.copy(alpha = 0.25f), radarRadius * 0.66f, center, style = Stroke(1.dp.toPx()))
+                            drawCircle(Red.copy(alpha = 0.25f), radarRadius * 0.33f, center, style = Stroke(1.dp.toPx()))
+                            // You, at the center of the emergency
+                            drawCircle(Red, 9.dp.toPx(), center)
+                            val centerLat = location?.latitude ?: 0.0
+                            val centerLon = location?.longitude ?: 0.0
+                            sosResponders.forEach { responder ->
+                                val dLat = responder.latitude - centerLat
+                                val dLon = responder.longitude - centerLon
+                                val bearing = Math.atan2(dLon, dLat)
+                                val distanceFraction = (responder.distanceKm / 3.0).coerceIn(0.18, 1.0)
+                                val position = Offset(
+                                    center.x + (Math.sin(bearing) * radarRadius * distanceFraction).toFloat(),
+                                    center.y - (Math.cos(bearing) * radarRadius * distanceFraction).toFloat()
+                                )
+                                drawCircle(Color(0xFF1F7A4A), 7.dp.toPx(), position)
+                            }
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Text("● You   ● Responders (green)", color = Slate, fontSize = 11.sp)
+                        Spacer(Modifier.height(10.dp))
+                        sosResponders.forEach { responder ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Mist, RoundedCornerShape(12.dp))
+                                    .padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    Modifier.size(10.dp).background(Color(0xFF1F7A4A), CircleShape)
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(responder.name, color = Navy, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                    Text(responder.qualification, color = Slate, fontSize = 12.sp)
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text("%.1f km".format(java.util.Locale.US, responder.distanceKm), color = Red, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                    Text("%.4f, %.4f".format(java.util.Locale.US, responder.latitude, responder.longitude), color = Slate, fontSize = 10.sp)
+                                }
+                            }
+                            Spacer(Modifier.height(6.dp))
+                        }
+                    }
+                    if (sosSucceeded && sosResponders.isEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("No responders within 3 km right now — your SOS stays active and alerts anyone who comes near.", color = Slate, fontSize = 13.sp)
+                    }
+                }
+            },
             confirmButton = {
                 TextButton(onClick = { showSent = false }) { Text("OK", color = Red, fontWeight = FontWeight.Bold) }
             }

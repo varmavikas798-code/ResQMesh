@@ -9,6 +9,21 @@ import java.net.URL
 
 data class AuthSession(val token: String, val user: User)
 
+/** A responder found near an SOS, with their live position. */
+data class SosResponder(
+    val name: String,
+    val qualification: String,
+    val latitude: Double,
+    val longitude: Double,
+    val distanceKm: Double
+)
+
+data class SosResult(
+    val responders: List<SosResponder>,
+    val notified: Int,
+    val delivery: String
+)
+
 class ResQApiException(val statusCode: Int, message: String) : IllegalStateException(message)
 
 object ResQApi {
@@ -69,7 +84,7 @@ object ResQApi {
         return if (body.isBlank()) JSONArray() else JSONArray(body)
     }
 
-    suspend fun createSos(token: String, latitude: Double, longitude: Double): String {
+    suspend fun createSos(token: String, latitude: Double, longitude: Double): SosResult {
         val result = request(
             "POST", "/sos",
             JSONObject()
@@ -78,10 +93,21 @@ object ResQApi {
                 .put("message", "Emergency assistance needed"),
             token
         )
+        val array = result.optJSONArray("responders") ?: JSONArray()
+        val responders = List(array.length()) { index ->
+            val row = array.getJSONObject(index)
+            SosResponder(
+                name = row.optString("name", "Responder"),
+                qualification = row.optString("qualification", "Responder"),
+                latitude = row.optDouble("latitude", 0.0),
+                longitude = row.optDouble("longitude", 0.0),
+                distanceKm = row.optDouble("distance_km", 0.0)
+            )
+        }
         val notified = result.optInt("responders_notified", 0)
         val delivery = result.optString("delivery").takeIf { it.isNotBlank() }
             ?: "Delivery status unknown"
-        return "SOS saved by the server. Nearby responders found: $notified. $delivery."
+        return SosResult(responders, notified, delivery)
     }
 
     suspend fun updateFcmToken(token: String, authToken: String) {
