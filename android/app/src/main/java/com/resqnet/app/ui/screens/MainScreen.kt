@@ -7,6 +7,8 @@ import android.location.Location
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
@@ -284,6 +286,23 @@ private fun HomeTab(
     val scope = rememberCoroutineScope()
     val activeEmergency by EmergencyStore.active.collectAsState()
     val emergencyFresh = activeEmergency != null && System.currentTimeMillis() - activeEmergency!!.receivedAt < 2 * 60 * 60 * 1000
+
+    // Reliability setup — makes sure alarms arrive on every phone brand
+    val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+    val batteryExempt = powerManager?.isIgnoringBatteryOptimizations(context.packageName) ?: true
+    val notificationsAllowed = if (Build.VERSION.SDK_INT >= 33) {
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    } else true
+    var showReliability by remember { mutableStateOf(false) }
+    val brandSteps = when (Build.MANUFACTURER.lowercase()) {
+        "xiaomi", "redmi", "poco" -> "• Security app → Permissions → Autostart → enable ResQNet\n• Battery & performance → App battery saver → ResQNet → No restrictions"
+        "oppo", "realme" -> "• Phone Manager → App startup → allow ResQNet to start in background\n• Battery → ResQNet → Allow background activity"
+        "vivo", "iqoo" -> "• i Manager → App manager → Autostart → enable ResQNet\n• Battery → High background power consumption → allow ResQNet"
+        "samsung" -> "• Settings → Battery → Background usage limits → remove ResQNet from Sleeping apps\n• Settings → Apps → ResQNet → Battery → Unrestricted"
+        "oneplus" -> "• Settings → Battery → Battery optimization → ResQNet → Don't optimize"
+        "honor", "huawei" -> "• Settings → Battery → App launch → ResQNet → Manage manually → enable all three"
+        else -> "• Settings → Apps → ResQNet → Battery → Unrestricted / Allow background activity"
+    }
     val firstName = user.name.trim().substringBefore(" ").ifBlank { "there" }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
@@ -404,6 +423,37 @@ private fun HomeTab(
                 Spacer(Modifier.height(14.dp))
             }
 
+            // Reliability setup — brand-specific guidance so alarms always arrive
+            if (!batteryExempt || !notificationsAllowed) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFFFFBEA), RoundedCornerShape(18.dp))
+                        .border(1.dp, Color(0xFFE3B341), RoundedCornerShape(18.dp))
+                        .padding(14.dp)
+                ) {
+                    Text("⚡ ALARM-PROOF YOUR PHONE", color = Color(0xFF9C6A00), fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        if (!notificationsAllowed) "Notifications are blocked — SOS alarms can't reach you."
+                        else "Battery optimization may delay emergency alarms on this phone.",
+                        color = Slate, fontSize = 13.sp
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "FIX NOW",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .background(Color(0xFFE8890C), RoundedCornerShape(10.dp))
+                            .clickable { showReliability = true }
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                }
+                Spacer(Modifier.height(14.dp))
+            }
+
             // SOS card
             Column(
                 modifier = Modifier
@@ -455,6 +505,46 @@ private fun HomeTab(
         }
     }
 
+    if (showReliability) {
+        AlertDialog(
+            onDismissRequest = { showReliability = false },
+            containerColor = Color.White,
+            title = { Text("Make alarms 100% reliable", color = Navy, fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    if (!notificationsAllowed) {
+                        Text("1. Turn ON notifications", color = Navy, fontWeight = FontWeight.Bold)
+                        TextButton(onClick = {
+                            try {
+                                context.startActivity(
+                                    android.content.Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                        .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                )
+                            } catch (_: Exception) {}
+                        }) { Text("Open notification settings", color = Red) }
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    Text("2. Allow alarms in battery settings", color = Navy, fontWeight = FontWeight.Bold)
+                    TextButton(onClick = {
+                        try {
+                            context.startActivity(
+                                android.content.Intent(
+                                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                    android.net.Uri.parse("package:${context.packageName}")
+                                )
+                            )
+                        } catch (_: Exception) {}
+                    }) { Text("Allow background alarms", color = Red) }
+                    Spacer(Modifier.height(8.dp))
+                    Text("3. ${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} extra steps", color = Navy, fontWeight = FontWeight.Bold)
+                    Text(brandSteps, color = Slate, fontSize = 13.sp)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showReliability = false }) { Text("DONE", color = Red, fontWeight = FontWeight.Bold) }
+            }
+        )
+    }
     if (showConfirm) {
         AlertDialog(
             onDismissRequest = { showConfirm = false },
