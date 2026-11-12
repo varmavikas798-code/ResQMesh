@@ -15,7 +15,27 @@ import com.resqnet.app.MainActivity
 import com.resqnet.app.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.util.Locale
+
+/** The most recent emergency received by this device's responder. */
+object EmergencyStore {
+    data class EmergencyInfo(
+        val requester: String,
+        val latitude: Double,
+        val longitude: Double,
+        val distanceKm: Double,
+        val receivedAt: Long
+    )
+
+    private val _active = MutableStateFlow<EmergencyInfo?>(null)
+    val active: StateFlow<EmergencyInfo?> = _active
+
+    fun post(info: EmergencyInfo) { _active.value = info }
+    fun clear() { _active.value = null }
+}
 
 class ResQFirebaseMessagingService : FirebaseMessagingService() {
 
@@ -36,11 +56,34 @@ class ResQFirebaseMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
 
-        val title = remoteMessage.notification?.title ?: remoteMessage.data["title"] ?: "ResQNet SOS Alert"
-        val message = remoteMessage.notification?.body ?: remoteMessage.data["message"] ?: "Emergency assistance requested nearby!"
-        val type = remoteMessage.data["type"] ?: "sos"
+        val data = remoteMessage.data
+        val title = remoteMessage.notification?.title ?: data["title"] ?: "ResQNet SOS Alert"
+        val message = remoteMessage.notification?.body ?: data["body"] ?: "Emergency assistance requested nearby!"
+        val type = data["type"] ?: "sos"
 
-        showHighPriorityAlert(title, message, type)
+        val emergencyLat = data["emergency_lat"]?.toDoubleOrNull()
+        val emergencyLon = data["emergency_lon"]?.toDoubleOrNull()
+        val requester = data["requester"] ?: "Someone"
+        val distanceKm = data["distance_km"]?.toDoubleOrNull() ?: 0.0
+
+        val locationLine = if (emergencyLat != null && emergencyLon != null) {
+            "📍 Emergency location: %.4f, %.4f".format(Locale.US, emergencyLat, emergencyLon)
+        } else null
+        val fullMessage = listOfNotNull(message, locationLine).joinToString("\n")
+
+        if (emergencyLat != null && emergencyLon != null) {
+            EmergencyStore.post(
+                EmergencyStore.EmergencyInfo(
+                    requester = requester,
+                    latitude = emergencyLat,
+                    longitude = emergencyLon,
+                    distanceKm = distanceKm,
+                    receivedAt = System.currentTimeMillis()
+                )
+            )
+        }
+
+        showHighPriorityAlert(title, fullMessage, type)
     }
 
     private fun showHighPriorityAlert(title: String, message: String, type: String) {

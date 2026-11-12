@@ -185,12 +185,15 @@ def nearby(lat: float, lon: float, radius_m: int=3000, user=Depends(current_user
           AND ST_DWithin(location,ST_SetSRID(ST_MakePoint(:lon,:lat),4326)::geography,:radius) ORDER BY location <-> ST_SetSRID(ST_MakePoint(:lon,:lat),4326)::geography"""), {"lon":lon,"lat":lat,"radius":min(radius_m,10000),"uid":user["id"]}).mappings().all()
     return [dict(x) for x in rows]
 
-def send_push_notification(token: str, title: str, body: str) -> str:
+def send_push_notification(token: str, title: str, body: str, extra: dict | None = None) -> str:
     try:
         # Data-only message: the Android app's ResQFirebaseMessagingService
         # receives it in ALL app states and renders the full-screen alarm.
+        data = {"title": title, "body": body, "type": "sos"}
+        if extra:
+            data.update({k: str(v) for k, v in extra.items()})
         message = messaging.Message(
-            data={"title": title, "body": body, "type": "sos"},
+            data=data,
             token=token,
             android=messaging.AndroidConfig(priority='high')
         )
@@ -217,7 +220,14 @@ def create_sos(body: SOS, user=Depends(current_user)):
             push_results[str(r.get("name", r["id"]))] = send_push_notification(
                 r["fcm_token"],
                 "🚨 EMERGENCY SOS!",
-                f"Urgent help needed {r['distance_km']}km away! {body.message}"
+                f"{user['name']} needs urgent help {r['distance_km']} km away!",
+                extra={
+                    "emergency_lat": body.latitude,
+                    "emergency_lon": body.longitude,
+                    "requester": user["name"],
+                    "distance_km": r["distance_km"],
+                    "sos_id": str(aid),
+                }
             )
 
     return {"id":str(aid),"status":"active","created_at":datetime.now(timezone.utc).isoformat(),"responders_notified":len(responders),"responders":[dict(x) for x in responders],"push_results":push_results,"delivery":"Push notifications via Firebase"}

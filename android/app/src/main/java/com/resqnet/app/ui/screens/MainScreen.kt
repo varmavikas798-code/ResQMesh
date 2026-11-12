@@ -54,6 +54,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -74,6 +75,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.resqnet.app.data.EmergencyStore
 import com.resqnet.app.data.SosResponder
 import com.resqnet.app.data.User
 import com.resqnet.app.data.ResQApi
@@ -280,6 +282,8 @@ private fun HomeTab(
     var sosResponders by remember { mutableStateOf<List<SosResponder>>(emptyList()) }
     var sosSucceeded by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val activeEmergency by EmergencyStore.active.collectAsState()
+    val emergencyFresh = activeEmergency != null && System.currentTimeMillis() - activeEmergency!!.receivedAt < 2 * 60 * 60 * 1000
     val firstName = user.name.trim().substringBefore(" ").ifBlank { "there" }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
@@ -346,6 +350,58 @@ private fun HomeTab(
                     if (accountSyncError != null) Text(accountSyncError, color = Red, fontSize = 11.sp)
                 }
                 Text(if (locationLoading) "…" else "Refresh", color = Red, fontSize = 14.sp, modifier = Modifier.clickable { requestLocation?.invoke() })
+            }
+
+            // Emergency near you — shown to responders when an SOS push arrives
+            if (emergencyFresh && activeEmergency != null) {
+                val emergency = activeEmergency!!
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFFFF4E5), RoundedCornerShape(18.dp))
+                        .border(2.dp, Color(0xFFE8890C), RoundedCornerShape(18.dp))
+                        .padding(16.dp)
+                ) {
+                    Text("🚨 EMERGENCY NEAR YOU", color = Color(0xFFB25E00), fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "${emergency.requester} needs help ${"%.1f".format(java.util.Locale.US, emergency.distanceKm)} km away",
+                        color = Navy, fontSize = 18.sp, fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Emergency location: %.4f, %.4f".format(java.util.Locale.US, emergency.latitude, emergency.longitude),
+                        color = Slate, fontSize = 13.sp
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            "🧭 NAVIGATE",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .background(Color(0xFF1F7A4A), RoundedCornerShape(10.dp))
+                                .clickable {
+                                    try {
+                                        val uri = android.net.Uri.parse("geo:${emergency.latitude},${emergency.longitude}?q=${emergency.latitude},${emergency.longitude}(Emergency+location)")
+                                        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri))
+                                    } catch (_: Exception) {}
+                                }
+                                .padding(horizontal = 16.dp, vertical = 10.dp)
+                        )
+                        Text(
+                            "DISMISS",
+                            color = Slate,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .background(Mist, RoundedCornerShape(10.dp))
+                                .clickable { EmergencyStore.clear() }
+                                .padding(horizontal = 16.dp, vertical = 10.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
             }
 
             // SOS card
