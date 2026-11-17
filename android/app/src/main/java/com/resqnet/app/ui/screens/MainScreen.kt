@@ -77,6 +77,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.resqnet.app.data.EmergencyListenerService
 import com.resqnet.app.data.EmergencyStore
 import com.resqnet.app.data.SosMesh
 import com.resqnet.app.data.SosResponder
@@ -281,6 +282,8 @@ private fun HomeTab(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants -> if (grants.values.any { it }) SosMesh.startListening(context) }
     LaunchedEffect(Unit) {
+        // Keep the process alive so SMS/FCM/BLE alarms are never deferred by the OS
+        EmergencyListenerService.start(context)
         if (btGranted) SosMesh.startListening(context) else btPermissionLauncher.launch(btPermissions)
     }
     val meshReady = btPermissions.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }

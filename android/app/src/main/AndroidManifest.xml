@@ -19,6 +19,8 @@
         tools:targetApi="s" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
         android:allowBackup="true"
@@ -62,6 +64,19 @@
                 <action android:name="com.resqnet.app.TEST_MESH_BEACON" />
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name=".data.SmsResultReceiver"
+            android:exported="false" />
+
+        <service
+            android:name=".data.EmergencyListenerService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="emergency_sos_listener" />
+        </service>
     </application>
 
 </manifest>

@@ -102,17 +102,35 @@ object SosSms {
             SmsManager.getDefault()
         } ?: return 0
         var sent = 0
+        var requestCode = (System.currentTimeMillis() % 30000).toInt()
         val seen = mutableSetOf<String>()
         for (phone in phones) {
             val target = phone.trim()
             if (target.isEmpty() || !seen.add(target)) continue
             try {
-                smsManager.sendTextMessage(target, null, message, null, null)
+                val sentIntent = PendingIntent.getBroadcast(
+                    context,
+                    requestCode++,
+                    Intent(context, SmsResultReceiver::class.java).putExtra("to", target),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                smsManager.sendTextMessage(target, null, message, sentIntent, null)
                 sent++
             } catch (_: Exception) {
             }
         }
         return sent
+    }
+}
+
+/** Logs the radio's verdict for every dispatched SOS SMS (emulators cannot route SMS between AVDs). */
+class SmsResultReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val target = intent.getStringExtra("to") ?: "unknown"
+        when (resultCode) {
+            android.app.Activity.RESULT_OK -> android.util.Log.d("ResQSMS", "SMS to $target accepted by radio")
+            else -> android.util.Log.w("ResQSMS", "SMS to $target FAILED (result=$resultCode) — no SIM/radio on this device")
+        }
     }
 }
 

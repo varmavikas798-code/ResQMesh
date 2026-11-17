@@ -2,6 +2,7 @@ package com.resqnet.app.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -155,37 +156,65 @@ object ResQApi {
         return if (body.isBlank()) JSONObject() else JSONObject(body)
     }
 
+    /**
+     * DNS-resilient HTTP: if the system resolver cannot resolve the emergency
+     * server's hostname (common during network outages), fall back to the last
+     * known server IP so SOS still reaches the backend. TLS still verifies the
+     * real hostname, so the connection stays secure.
+     */
+    private val resilientDns = object : okhttp3.Dns {
+        override fun lookup(hostname: String): List<java.net.InetAddress> {
+            return try {
+                okhttp3.Dns.SYSTEM.lookup(hostname)
+            } catch (error: java.net.UnknownHostException) {
+                if (hostname == "resqmesh-api-3g1c.onrender.com") {
+                    listOf(java.net.InetAddress.getByAddress(
+                        hostname,
+                        byteArrayOf(216.toByte(), 24, 57, 16)
+                    ))
+                } else throw error
+            }
+        }
+    }
+
+    private val httpClient = okhttp3.OkHttpClient.Builder()
+        .dns(resilientDns)
+        .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
+
     private suspend fun rawRequest(
         method: String,
         path: String,
         payload: JSONObject,
         token: String? = null
     ): String = withContext(Dispatchers.IO) {
-        val connection = (URL("$BASE_URL$path").openConnection() as HttpURLConnection).apply {
-            requestMethod = method
-            // Free-tier hosting (Render) sleeps after inactivity and can take 30-60s
-            // to wake. Longer timeouts let the first call survive the cold start.
-            connectTimeout = 20_000
-            readTimeout = 45_000
-            doOutput = method !in setOf("GET", "HEAD")
-            setRequestProperty("Content-Type", "application/json")
-            token?.let { setRequestProperty("Authorization", "Bearer $it") }
+        val requestBody = if (method in setOf("GET", "HEAD")) {
+            null
+        } else {
+            okhttp3.RequestBody.create(
+                "application/json; charset=utf-8".toMediaTypeOrNull(),
+                payload.toString()
+            )
         }
+        val builder = okhttp3.Request.Builder()
+            .url("$BASE_URL$path")
+            .method(method, requestBody)
+        token?.let { builder.header("Authorization", "Bearer $it") }
 
         try {
-            if (connection.doOutput) {
-                connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+            httpClient.newCall(builder.build()).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    val detail = runCatching { JSONObject(body).optString("detail") }.getOrNull()
+                    throw ResQApiException(response.code, detail?.takeIf(String::isNotBlank) ?: "Server returned HTTP ${response.code}")
+                }
+                body
             }
-            val status = connection.responseCode
-            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-            val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (status !in 200..299) {
-                val detail = runCatching { JSONObject(body).optString("detail") }.getOrNull()
-                throw ResQApiException(status, detail?.takeIf(String::isNotBlank) ?: "Server returned HTTP $status")
-            }
-            body
-        } finally {
-            connection.disconnect()
+        } catch (error: ResQApiException) {
+            throw error
+        } catch (error: java.io.IOException) {
+            throw IllegalStateException("ResQMesh server unreachable (${error.message ?: "network error"}). SMS and Bluetooth SOS layers stay active.", error)
         }
     }
 }
