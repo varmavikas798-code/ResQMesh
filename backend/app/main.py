@@ -48,7 +48,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 class Register(BaseModel):
     name: str = Field(min_length=2, max_length=100)
     email: EmailStr
-    phone: str = Field(pattern=r"^\d{10}$")
+    phone: str = Field(pattern=r"^\d{4,10}$")
     password: str = Field(min_length=6)
     qualification: Literal["Doctor", "Nurse", "Paramedic", "CPR Volunteer"]
 
