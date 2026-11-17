@@ -78,6 +78,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.resqnet.app.data.EmergencyStore
+import com.resqnet.app.data.SosMesh
 import com.resqnet.app.data.SosResponder
 import com.resqnet.app.data.SosSms
 import com.resqnet.app.data.User
@@ -264,6 +265,26 @@ private fun HomeTab(
         }
     }
     LaunchedEffect(Unit) { requestLocation?.invoke() }
+
+    // Layer 3 — Bluetooth mesh listener: detect SOS beacons from nearby phones
+    val btPermissions = if (Build.VERSION.SDK_INT >= 31) {
+        arrayOf(
+            Manifest.permission.BLUETOOTH_SCAN,
+            Manifest.permission.BLUETOOTH_ADVERTISE,
+            Manifest.permission.BLUETOOTH_CONNECT
+        )
+    } else {
+        arrayOf(Manifest.permission.BLUETOOTH, Manifest.permission.BLUETOOTH_ADMIN)
+    }
+    val btGranted = btPermissions.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
+    val btPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants -> if (grants.values.any { it }) SosMesh.startListening(context) }
+    LaunchedEffect(Unit) {
+        if (btGranted) SosMesh.startListening(context) else btPermissionLauncher.launch(btPermissions)
+    }
+    val meshReady = btPermissions.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
+
     var locationSyncMessage by remember { mutableStateOf("") }
     LaunchedEffect(location?.latitude, location?.longitude, authToken) {
         val current = location
@@ -589,14 +610,19 @@ private fun HomeTab(
                                     if (canSend) {
                                         val sent = SosSms.send(context, smsTargets, user.name, current.latitude, current.longitude)
                                         sosMessage += " SMS sent to $sent responder(s)."
-                                    } else {
-                                        smsPendingTargets = smsTargets
-                                        smsPendingLocation = current.latitude to current.longitude
-                                        sosMessage += " SMS backup needs permission."
-                                        smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
-                                    }
-                                }
-                                sosSucceeded = true
+                                     } else {
+                                         smsPendingTargets = smsTargets
+                                         smsPendingLocation = current.latitude to current.longitude
+                                         sosMessage += " SMS backup needs permission."
+                                         smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
+                                     }
+                                 }
+                                 // Layer 3 — Bluetooth mesh broadcast: SOS beacon works with no network
+                                 if (meshReady) {
+                                     SosMesh.startAdvertising(context, current.latitude, current.longitude)
+                                     sosMessage += " Bluetooth SOS beacon active for 10 min."
+                                 }
+                                 sosSucceeded = true
                                 val time = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date())
                                 val coordinates = "%.5f, %.5f".format(Locale.US, current.latitude, current.longitude)
                                 onSosSent(AlertRecord("SOS request", coordinates, time, "Saved to server"))
@@ -604,6 +630,12 @@ private fun HomeTab(
                                 sosSucceeded = false
                                 sosResponders = emptyList()
                                 sosMessage = error.message ?: "Couldn't reach the ResQMesh server."
+                                // Server unreachable — still broadcast the offline SOS layers
+                                val offlineLocation = location
+                                if (offlineLocation != null && meshReady) {
+                                    SosMesh.startAdvertising(context, offlineLocation.latitude, offlineLocation.longitude)
+                                    sosMessage += " Offline mode: Bluetooth SOS beacon active for 10 min so nearby phones get your location."
+                                }
                             } finally {
                                 sendingSos = false
                                 showSent = true
