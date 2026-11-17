@@ -15,7 +15,8 @@ data class SosResponder(
     val qualification: String,
     val latitude: Double,
     val longitude: Double,
-    val distanceKm: Double
+    val distanceKm: Double,
+    val phone: String
 )
 
 data class SosResult(
@@ -101,7 +102,8 @@ object ResQApi {
                 qualification = row.optString("qualification", "Responder"),
                 latitude = row.optDouble("latitude", 0.0),
                 longitude = row.optDouble("longitude", 0.0),
-                distanceKm = row.optDouble("distance_km", 0.0)
+                distanceKm = row.optDouble("distance_km", 0.0),
+                phone = row.optString("phone", "")
             )
         }
         val notified = result.optInt("responders_notified", 0)

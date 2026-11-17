@@ -79,6 +79,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.resqnet.app.data.EmergencyStore
 import com.resqnet.app.data.SosResponder
+import com.resqnet.app.data.SosSms
 import com.resqnet.app.data.User
 import com.resqnet.app.data.ResQApi
 import com.resqnet.app.ui.components.LogoBadge
@@ -283,6 +284,20 @@ private fun HomeTab(
     var sosMessage by remember { mutableStateOf("") }
     var sosResponders by remember { mutableStateOf<List<SosResponder>>(emptyList()) }
     var sosSucceeded by remember { mutableStateOf(false) }
+    var smsPendingTargets by remember { mutableStateOf<List<String>>(emptyList()) }
+    var smsPendingLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+    val smsPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val targets = smsPendingTargets
+        val pending = smsPendingLocation
+        if (granted && targets.isNotEmpty() && pending != null) {
+            val sent = SosSms.send(context, targets, user.name, pending.first, pending.second)
+            sosMessage = sosMessage.replace("SMS backup needs permission.", "SMS sent to $sent responder(s).")
+        }
+        smsPendingTargets = emptyList()
+        smsPendingLocation = null
+    }
     val scope = rememberCoroutineScope()
     val activeEmergency by EmergencyStore.active.collectAsState()
     val emergencyFresh = activeEmergency != null && System.currentTimeMillis() - activeEmergency!!.receivedAt < 2 * 60 * 60 * 1000
@@ -567,6 +582,20 @@ private fun HomeTab(
                                 val sosResult = ResQApi.createSos(token, current.latitude, current.longitude)
                                 sosResponders = sosResult.responders
                                 sosMessage = "Nearby responders found: ${sosResult.notified}. ${sosResult.delivery}."
+                                // Layer 2 — SMS fallback: also text every responder's phone directly
+                                val smsTargets = sosResult.responders.map { it.phone }.filter { it.isNotBlank() }
+                                if (smsTargets.isNotEmpty()) {
+                                    val canSend = ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
+                                    if (canSend) {
+                                        val sent = SosSms.send(context, smsTargets, user.name, current.latitude, current.longitude)
+                                        sosMessage += " SMS sent to $sent responder(s)."
+                                    } else {
+                                        smsPendingTargets = smsTargets
+                                        smsPendingLocation = current.latitude to current.longitude
+                                        sosMessage += " SMS backup needs permission."
+                                        smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
+                                    }
+                                }
                                 sosSucceeded = true
                                 val time = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date())
                                 val coordinates = "%.5f, %.5f".format(Locale.US, current.latitude, current.longitude)
