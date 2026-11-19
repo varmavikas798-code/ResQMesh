@@ -255,7 +255,7 @@ fun ResQNetApp() {
                                 demoPhoneOtp = code
                                 firebaseVerificationId = null
                                 phoneCodeSent = true
-                                authError = null
+                                authError = "Firebase SMS unavailable: ${firebaseError.message ?: "unknown error"}. Using demo OTP."
                             } else {
                                 authError = "Could not send code: ${firebaseError.message ?: "unknown error"}"
                             }
