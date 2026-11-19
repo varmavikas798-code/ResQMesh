@@ -619,7 +619,10 @@ private fun HomeTab(
                                 ResponderCache.save(context, smsTargets)
                                 if (smsTargets.isNotEmpty()) {
                                     val canSend = ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
-                                    if (canSend) {
+                                    val unavailable = SosSms.smsUnavailableReason(context)
+                                    if (unavailable != null) {
+                                        sosMessage += " $unavailable"
+                                    } else if (canSend) {
                                         val sent = SosSms.send(context, smsTargets, user.name, current.latitude, current.longitude)
                                         sosMessage += " SMS sent to $sent responder(s)."
                                      } else {
@@ -650,7 +653,10 @@ private fun HomeTab(
                                 val cachedPhones = ResponderCache.load(context)
                                 if (cachedPhones.isNotEmpty()) {
                                     val canSend = ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
-                                    if (canSend) {
+                                    val unavailable = SosSms.smsUnavailableReason(context)
+                                    if (unavailable != null) {
+                                        sosMessage += " $unavailable"
+                                    } else if (canSend) {
                                         val sent = SosSms.send(context, cachedPhones, user.name, offlineLocation?.latitude ?: 0.0, offlineLocation?.longitude ?: 0.0)
                                         sosMessage += "Offline SMS sent to $sent cached responder(s)."
                                     } else {

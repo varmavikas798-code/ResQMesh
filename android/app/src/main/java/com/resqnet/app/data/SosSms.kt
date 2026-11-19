@@ -87,6 +87,17 @@ object SosAlarm {
 object SosSms {
     const val MARKER = "RESQMESH SOS:"
 
+    fun smsUnavailableReason(context: Context): String? {
+        val airplane = try {
+            android.provider.Settings.Global.getInt(context.contentResolver, android.provider.Settings.Global.AIRPLANE_MODE_ON, 0) == 1
+        } catch (_: Exception) { false }
+        if (airplane) return "Airplane mode is on — SMS cannot be sent. Turn on Bluetooth for nearby mesh alerts."
+        val telephony = context.getSystemService(Context.TELEPHONY_SERVICE) as? android.telephony.TelephonyManager
+        val simReady = telephony?.simState == android.telephony.TelephonyManager.SIM_STATE_READY
+        if (!simReady) return "No SIM signal — SMS cannot be sent. Turn on Bluetooth for nearby mesh alerts."
+        return null
+    }
+
     fun buildMessage(name: String, latitude: Double, longitude: Double): String {
         val mapLink = "https://maps.google.com/?q=$latitude,$longitude"
         return "$MARKER $name needs help NOW! Location: $latitude,$longitude Map: $mapLink"
