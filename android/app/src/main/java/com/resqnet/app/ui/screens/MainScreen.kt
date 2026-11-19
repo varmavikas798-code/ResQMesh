@@ -304,7 +304,7 @@ private fun HomeTab(
                     ResponderCache.save(context, phones)
                 } catch (_: Exception) {}
             } catch (error: Exception) {
-                locationSyncMessage = "Location sync failed: ${error.message ?: "server unavailable"}"
+                locationSyncMessage = "Offline — location saved on this phone, will sync when connected"
             }
         }
     }
@@ -314,6 +314,7 @@ private fun HomeTab(
     var sosMessage by remember { mutableStateOf("") }
     var sosResponders by remember { mutableStateOf<List<SosResponder>>(emptyList()) }
     var sosSucceeded by remember { mutableStateOf(false) }
+    var sosOffline by remember { mutableStateOf(false) }
     var smsPendingTargets by remember { mutableStateOf<List<String>>(emptyList()) }
     var smsPendingLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     val smsPermissionLauncher = rememberLauncherForActivityResult(
@@ -638,11 +639,13 @@ private fun HomeTab(
                                      sosMessage += " Bluetooth SOS beacon active for 10 min."
                                  }
                                  sosSucceeded = true
+                                sosOffline = false
                                 val time = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date())
                                 val coordinates = "%.5f, %.5f".format(Locale.US, current.latitude, current.longitude)
                                 onSosSent(AlertRecord("SOS request", coordinates, time, "Saved to server"))
                             } catch (error: Exception) {
                                 sosSucceeded = false
+                                sosOffline = true
                                 sosResponders = emptyList()
                                 sosMessage = "No internet — offline SOS is active. "
                                 val offlineLocation = location
@@ -685,7 +688,13 @@ private fun HomeTab(
         AlertDialog(
             onDismissRequest = { showSent = false },
             containerColor = Color.White,
-            title = { Text(if (sosSucceeded) "SOS request received" else "SOS request failed", color = if (sosSucceeded) GreenText else Red, fontWeight = FontWeight.Bold) },
+            title = {
+                Text(
+                    if (sosSucceeded) "SOS request received" else if (sosOffline) "OFFLINE SOS ACTIVE" else "SOS request failed",
+                    color = if (sosSucceeded || sosOffline) GreenText else Red,
+                    fontWeight = FontWeight.Bold
+                )
+            },
             text = {
                 Column {
                     Text(sosMessage, color = Slate)
