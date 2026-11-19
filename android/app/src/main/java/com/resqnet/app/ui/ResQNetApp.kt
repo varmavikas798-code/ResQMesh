@@ -1,5 +1,10 @@
 package com.resqnet.app.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.telephony.SmsManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -8,8 +13,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import com.resqnet.app.data.AuthSession
-import com.resqnet.app.data.PhoneAuthHelper
 import com.resqnet.app.data.ResQApi
 import com.resqnet.app.data.ResQApiException
 import com.resqnet.app.data.SessionStore
@@ -42,6 +47,35 @@ fun ResQNetApp() {
     var phoneCodeSent by remember { mutableStateOf(false) }
     var demoPhoneOtp by remember { mutableStateOf<String?>(null) }
     var firebaseVerificationId by remember { mutableStateOf<String?>(null) }
+    var pendingPhone by remember { mutableStateOf<String?>(null) }
+
+    suspend fun sendVerificationSms(number: String) {
+        authBusy = true
+        authError = null
+        try {
+            val token = authToken ?: throw IllegalStateException("Account is not signed in")
+            val code = ResQApi.requestSmsOtp(token, number)
+            val manager = context.getSystemService(SmsManager::class.java)
+                ?: throw IllegalStateException("SMS is not available on this device")
+            manager.sendTextMessage(number, null, "ResQNet verification code: $code. Do not share this code.", null, null)
+            phoneCodeSent = true
+            demoPhoneOtp = null
+            firebaseVerificationId = null
+        } catch (error: Exception) {
+            authError = error.message ?: "Could not send the verification SMS."
+        } finally {
+            authBusy = false
+        }
+    }
+
+    val smsPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val number = pendingPhone
+        if (granted && number != null) scope.launch { sendVerificationSms(number) }
+        else if (!granted) authError = "SMS permission is required to verify your number."
+        pendingPhone = null
+    }
 
     // Push readiness must survive a sleeping free-tier server: read the FCM
     // token locally first, then retry the upload a few times with backoff.
@@ -236,35 +270,17 @@ fun ResQNetApp() {
 
         Screen.PhoneVerify -> PhoneVerifyScreen(
             phone = user?.phone ?: "",
-            demoOtp = demoPhoneOtp,
+            demoOtp = null,
             codeSent = phoneCodeSent,
             busy = authBusy,
             serverError = authError,
             onSendCode = { number ->
-                authBusy = true
                 authError = null
-                scope.launch {
-                    try {
-                        firebaseVerificationId = PhoneAuthHelper.sendCode(PhoneAuthHelper.activity(context), number)
-                        demoPhoneOtp = null
-                        phoneCodeSent = true
-                    } catch (firebaseError: Exception) {
-                        try {
-                            val code = authToken?.let { ResQApi.requestDemoPhoneOtp(it, number) }
-                            if (!code.isNullOrBlank()) {
-                                demoPhoneOtp = code
-                                firebaseVerificationId = null
-                                phoneCodeSent = true
-                                authError = "Firebase SMS unavailable: ${firebaseError.message ?: "unknown error"}. Using demo OTP."
-                            } else {
-                                authError = "Could not send code: ${firebaseError.message ?: "unknown error"}"
-                            }
-                        } catch (demoError: Exception) {
-                            authError = "Could not send code: ${demoError.message ?: firebaseError.message}"
-                        }
-                    } finally {
-                        authBusy = false
-                    }
+                if (ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED) {
+                    scope.launch { sendVerificationSms(number) }
+                } else {
+                    pendingPhone = number
+                    smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
                 }
             },
             onVerify = { code ->
@@ -273,12 +289,7 @@ fun ResQNetApp() {
                 scope.launch {
                     try {
                         val token = authToken ?: throw IllegalStateException("Account is not signed in")
-                        val verified = if (firebaseVerificationId != null && demoPhoneOtp == null) {
-                            val idToken = PhoneAuthHelper.idToken(firebaseVerificationId!!, code)
-                            ResQApi.verifyPhone(token, idToken)
-                        } else {
-                            ResQApi.confirmDemoPhoneOtp(token, code)
-                        }.copy(password = "")
+                        val verified = ResQApi.confirmSmsOtp(token, code).copy(password = "")
                         store.saveUser(verified)
                         user = verified
                         phoneCodeSent = false

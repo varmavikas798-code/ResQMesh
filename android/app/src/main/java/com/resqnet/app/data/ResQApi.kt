@@ -68,6 +68,14 @@ object ResQApi {
         request("POST", "/auth/verify-phone-demo/confirm", JSONObject().put("otp", otp), token)
     )
 
+    suspend fun requestSmsOtp(token: String, phone: String): String = request(
+        "POST", "/auth/verify-phone-sms/request", JSONObject().put("phone", phone), token
+    ).optString("otp")
+
+    suspend fun confirmSmsOtp(token: String, otp: String): User = parseUser(
+        request("POST", "/auth/verify-phone-sms/confirm", JSONObject().put("otp", otp), token)
+    )
+
     /** Migrate a pre-backend local account, or sign into an account already present on the API. */
     suspend fun syncLocalAccount(user: User): AuthSession {
         return try {

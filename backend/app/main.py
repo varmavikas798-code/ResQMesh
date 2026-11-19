@@ -197,17 +197,37 @@ def demo_phone_request(body: DemoPhoneRequest, user=Depends(current_user)):
           ON CONFLICT(email) DO UPDATE SET code=:c,phone=:p,expires_at=now()+interval '10 minutes'"""), {"e":user["email"],"c":code,"p":phone})
     return {"ok": True, "demo_otp": code}
 
+def confirm_phone_otp(uid: str, email: str, otp: str):
+    with db() as s:
+        row = s.execute(text("SELECT code,phone FROM phone_otps WHERE email=:e AND expires_at>now()"), {"e":email}).mappings().first()
+        if not row or row["code"] != otp:
+            raise HTTPException(400, "OTP invalid or expired")
+        phone = row["phone"]
+        s.execute(text("DELETE FROM phone_otps WHERE email=:e"), {"e":email})
+    return mark_phone_verified(uid, phone)
+
 @app.post("/auth/verify-phone-demo/confirm")
 def demo_phone_confirm(body: DemoPhoneConfirm, user=Depends(current_user)):
     if os.getenv("DEMO_PHONE_VERIFY", "true").lower() not in ("1", "true", "yes"):
         raise HTTPException(404, "Not found")
+    return confirm_phone_otp(user["id"], user["email"], body.otp)
+
+@app.post("/auth/verify-phone-sms/request")
+def sms_phone_request(body: DemoPhoneRequest, user=Depends(current_user)):
+    if os.getenv("SELF_SMS_VERIFY", "true").lower() not in ("1", "true", "yes"):
+        raise HTTPException(404, "Not found")
+    code = f"{random.randint(0,999999):06d}"
+    phone = body.phone if body.phone.startswith("+") else "+" + body.phone
     with db() as s:
-        row = s.execute(text("SELECT code,phone FROM phone_otps WHERE email=:e AND expires_at>now()"), {"e":user["email"]}).mappings().first()
-        if not row or row["code"] != body.otp:
-            raise HTTPException(400, "OTP invalid or expired")
-        phone = row["phone"]
-        s.execute(text("DELETE FROM phone_otps WHERE email=:e"), {"e":user["email"]})
-    return mark_phone_verified(user["id"], phone)
+        s.execute(text("""INSERT INTO phone_otps(email,code,phone,expires_at) VALUES(:e,:c,:p,now()+interval '10 minutes')
+          ON CONFLICT(email) DO UPDATE SET code=:c,phone=:p,expires_at=now()+interval '10 minutes'"""), {"e":user["email"],"c":code,"p":phone})
+    return {"ok": True, "otp": code}
+
+@app.post("/auth/verify-phone-sms/confirm")
+def sms_phone_confirm(body: DemoPhoneConfirm, user=Depends(current_user)):
+    if os.getenv("SELF_SMS_VERIFY", "true").lower() not in ("1", "true", "yes"):
+        raise HTTPException(404, "Not found")
+    return confirm_phone_otp(user["id"], user["email"], body.otp)
 
 @app.put("/responders/location")
 def set_location(body: Location, user=Depends(current_user)):
