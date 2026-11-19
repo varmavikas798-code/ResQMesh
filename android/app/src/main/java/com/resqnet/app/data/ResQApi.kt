@@ -179,9 +179,9 @@ object ResQApi {
 
     /**
      * DNS-resilient HTTP: if the system resolver cannot resolve the emergency
-     * server's hostname (common during network outages), fall back to the last
-     * known server IP so SOS still reaches the backend. TLS still verifies the
-     * real hostname, so the connection stays secure.
+     * server's hostname (common during network outages), fall back to known
+     * Render edge IPs. TLS still verifies the real hostname, so the connection
+     * stays secure. OkHttp tries each address until one connects.
      */
     private val resilientDns = object : okhttp3.Dns {
         override fun lookup(hostname: String): List<java.net.InetAddress> {
@@ -189,10 +189,12 @@ object ResQApi {
                 okhttp3.Dns.SYSTEM.lookup(hostname)
             } catch (error: java.net.UnknownHostException) {
                 if (hostname == "resqmesh-api-3g1c.onrender.com") {
-                    listOf(java.net.InetAddress.getByAddress(
-                        hostname,
-                        byteArrayOf(216.toByte(), 24, 57, 16)
-                    ))
+                    listOf(16, 18).map { lastOctet ->
+                        java.net.InetAddress.getByAddress(
+                            hostname,
+                            byteArrayOf(216.toByte(), 24, 57, lastOctet.toByte())
+                        )
+                    }
                 } else throw error
             }
         }
