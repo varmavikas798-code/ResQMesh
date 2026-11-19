@@ -179,7 +179,7 @@ def update_fcm_token(body: FcmToken | None = None, legacy: str | None = Header(d
 @app.get("/responders/nearby")
 def nearby(lat: float, lon: float, radius_m: int=3000, user=Depends(current_user)):
     with db() as s:
-        rows=s.execute(text("""SELECT id,name,qualification,ST_Y(location::geometry) latitude,ST_X(location::geometry) longitude,
+        rows=s.execute(text("""SELECT id,name,qualification,phone,ST_Y(location::geometry) latitude,ST_X(location::geometry) longitude,
           round((ST_Distance(location,ST_SetSRID(ST_MakePoint(:lon,:lat),4326)::geography)/1000)::numeric,2) distance_km
           FROM users WHERE verified AND available AND location IS NOT NULL AND id<>:uid
           AND ST_DWithin(location,ST_SetSRID(ST_MakePoint(:lon,:lat),4326)::geography,:radius) ORDER BY location <-> ST_SetSRID(ST_MakePoint(:lon,:lat),4326)::geography"""), {"lon":lon,"lat":lat,"radius":min(radius_m,10000),"uid":user["id"]}).mappings().all()

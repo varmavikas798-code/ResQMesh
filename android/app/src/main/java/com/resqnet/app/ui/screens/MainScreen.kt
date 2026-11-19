@@ -84,6 +84,7 @@ import com.resqnet.app.data.SosResponder
 import com.resqnet.app.data.SosSms
 import com.resqnet.app.data.User
 import com.resqnet.app.data.ResQApi
+import com.resqnet.app.data.ResponderCache
 import com.resqnet.app.ui.components.LogoBadge
 import com.resqnet.app.ui.theme.BlueBg
 import com.resqnet.app.ui.theme.BlueText
@@ -297,6 +298,11 @@ private fun HomeTab(
             try {
                 ResQApi.setResponderLocation(token, current.latitude, current.longitude)
                 locationSyncMessage = "Responder location saved to server"
+                try {
+                    val nearby = ResQApi.nearbyResponders(token, current.latitude, current.longitude)
+                    val phones = List(nearby.length()) { nearby.getJSONObject(it).optString("phone", "") }
+                    ResponderCache.save(context, phones)
+                } catch (_: Exception) {}
             } catch (error: Exception) {
                 locationSyncMessage = "Location sync failed: ${error.message ?: "server unavailable"}"
             }
@@ -317,7 +323,9 @@ private fun HomeTab(
         val pending = smsPendingLocation
         if (granted && targets.isNotEmpty() && pending != null) {
             val sent = SosSms.send(context, targets, user.name, pending.first, pending.second)
-            sosMessage = sosMessage.replace("SMS backup needs permission.", "SMS sent to $sent responder(s).")
+            sosMessage = sosMessage
+                .replace("SMS backup needs permission.", "SMS sent to $sent responder(s).")
+                .replace("Offline SMS needs permission.", "Offline SMS sent to $sent responder(s).")
         }
         smsPendingTargets = emptyList()
         smsPendingLocation = null
@@ -608,6 +616,7 @@ private fun HomeTab(
                                 sosMessage = "Nearby responders found: ${sosResult.notified}. ${sosResult.delivery}."
                                 // Layer 2 — SMS fallback: also text every responder's phone directly
                                 val smsTargets = sosResult.responders.map { it.phone }.filter { it.isNotBlank() }
+                                ResponderCache.save(context, smsTargets)
                                 if (smsTargets.isNotEmpty()) {
                                     val canSend = ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
                                     if (canSend) {
@@ -632,12 +641,26 @@ private fun HomeTab(
                             } catch (error: Exception) {
                                 sosSucceeded = false
                                 sosResponders = emptyList()
-                                sosMessage = error.message ?: "Couldn't reach the ResQMesh server."
-                                // Server unreachable — still broadcast the offline SOS layers
+                                sosMessage = "No internet — offline SOS is active. "
                                 val offlineLocation = location
                                 if (offlineLocation != null && meshReady) {
                                     SosMesh.startAdvertising(context, offlineLocation.latitude, offlineLocation.longitude)
-                                    sosMessage += " Offline mode: Bluetooth SOS beacon active for 10 min so nearby phones get your location."
+                                    sosMessage += "Bluetooth SOS beacon broadcasting your location for 10 min. "
+                                }
+                                val cachedPhones = ResponderCache.load(context)
+                                if (cachedPhones.isNotEmpty()) {
+                                    val canSend = ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
+                                    if (canSend) {
+                                        val sent = SosSms.send(context, cachedPhones, user.name, offlineLocation?.latitude ?: 0.0, offlineLocation?.longitude ?: 0.0)
+                                        sosMessage += "Offline SMS sent to $sent cached responder(s)."
+                                    } else {
+                                        smsPendingTargets = cachedPhones
+                                        smsPendingLocation = offlineLocation?.latitude?.let { it to (offlineLocation.longitude) }
+                                        sosMessage += "Offline SMS needs permission."
+                                        smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
+                                    }
+                                } else {
+                                    sosMessage += "No cached responder numbers yet — connect once to save them."
                                 }
                             } finally {
                                 sendingSos = false
