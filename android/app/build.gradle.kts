@@ -63,6 +63,7 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.3.0"))
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.firebase:firebase-messaging-ktx")
+    implementation("com.google.firebase:firebase-auth-ktx")
 
     // Fused location (Wi-Fi/cell + GPS fallback for reliable indoor fixes)
     implementation("com.google.android.gms:play-services-location:21.3.0")

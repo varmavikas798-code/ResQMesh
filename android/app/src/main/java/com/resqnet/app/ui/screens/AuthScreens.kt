@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -258,6 +259,92 @@ fun OtpScreen(
                 modifier = Modifier.clickable(enabled = !busy) { code = ""; error = null; onResend() }
             )
         }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Line))
+    }
+}
+
+@Composable
+fun PhoneVerifyScreen(
+    phone: String,
+    demoOtp: String?,
+    codeSent: Boolean,
+    busy: Boolean,
+    serverError: String?,
+    onSendCode: (String) -> Unit,
+    onVerify: (String) -> Unit,
+    onSkip: () -> Unit
+) {
+    var number by remember { mutableStateOf(if (phone.startsWith("+")) phone else "+") }
+    var code by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    AuthContainer {
+        Spacer(Modifier.height(12.dp))
+        Text("Verify your phone", color = Navy, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "Nearby responders only get your emergency SMS if your number is verified.",
+            color = Slate, fontSize = 14.sp
+        )
+
+        FieldLabel("Mobile number with country code")
+        ResQField(
+            number,
+            { number = it.filter { ch -> ch.isDigit() || ch == '+' }.take(16) },
+            "+919876543210",
+            icon = Icons.Outlined.Phone,
+            keyboardType = KeyboardType.Phone
+        )
+
+        if (!codeSent) {
+            ErrorText(serverError ?: error)
+            Spacer(Modifier.height(20.dp))
+            PrimaryButton(if (busy) "Sending code…" else "Send verification code", enabled = !busy) {
+                if (!number.matches(Regex("^\\+[1-9]\\d{7,14}$"))) {
+                    error = "Enter your number with country code, e.g. +919876543210."
+                } else {
+                    error = null
+                    onSendCode(number)
+                }
+            }
+        } else {
+            demoOtp?.let {
+                Text(
+                    "Demo mode — your SMS OTP is $it",
+                    color = Red, fontWeight = FontWeight.SemiBold, fontSize = 14.sp,
+                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+                        .background(RedLight, RoundedCornerShape(12.dp))
+                        .border(1.dp, RedBorder, RoundedCornerShape(12.dp)).padding(12.dp)
+                )
+            }
+            FieldLabel("6-digit code from SMS")
+            ResQField(
+                code,
+                { code = it.filter(Char::isDigit).take(6) },
+                "• • • • • •",
+                icon = Icons.Outlined.Lock,
+                keyboardType = KeyboardType.NumberPassword
+            )
+            ErrorText(serverError ?: error)
+            Spacer(Modifier.height(20.dp))
+            PrimaryButton(if (busy) "Verifying…" else "Verify & Continue", enabled = !busy) {
+                if (code.length != 6) error = "Enter the 6-digit code."
+                else { error = null; onVerify(code) }
+            }
+            Text(
+                "Resend code",
+                color = Red, fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 20.dp).clickable(enabled = !busy) {
+                    code = ""
+                    onSendCode(number)
+                }
+            )
+        }
+
+        Text(
+            "Skip for now",
+            color = Slate, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(top = 28.dp).clickable(enabled = !busy) { onSkip() }
+        )
         Box(Modifier.fillMaxWidth().height(1.dp).background(Line))
     }
 }

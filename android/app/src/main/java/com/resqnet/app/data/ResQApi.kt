@@ -56,6 +56,18 @@ object ResQApi {
 
     suspend fun currentUser(token: String): User = parseUser(request("GET", "/me", JSONObject(), token))
 
+    suspend fun verifyPhone(token: String, idToken: String): User = parseUser(
+        request("POST", "/auth/verify-phone", JSONObject().put("id_token", idToken), token)
+    )
+
+    suspend fun requestDemoPhoneOtp(token: String, phone: String): String = request(
+        "POST", "/auth/verify-phone-demo/request", JSONObject().put("phone", phone), token
+    ).optString("demo_otp")
+
+    suspend fun confirmDemoPhoneOtp(token: String, otp: String): User = parseUser(
+        request("POST", "/auth/verify-phone-demo/confirm", JSONObject().put("otp", otp), token)
+    )
+
     /** Migrate a pre-backend local account, or sign into an account already present on the API. */
     suspend fun syncLocalAccount(user: User): AuthSession {
         return try {
@@ -131,7 +143,8 @@ object ResQApi {
             email = profile.optString("email"),
             phone = profile.optString("phone"),
             password = "",
-            qualification = profile.optString("qualification", "CPR Volunteer")
+            qualification = profile.optString("qualification", "CPR Volunteer"),
+            phoneVerified = profile.optBoolean("phone_verified", false)
         )
     }
 

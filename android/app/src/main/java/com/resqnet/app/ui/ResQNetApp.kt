@@ -9,6 +9,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import com.resqnet.app.data.AuthSession
+import com.resqnet.app.data.PhoneAuthHelper
 import com.resqnet.app.data.ResQApi
 import com.resqnet.app.data.ResQApiException
 import com.resqnet.app.data.SessionStore
@@ -16,6 +17,7 @@ import com.resqnet.app.data.User
 import com.resqnet.app.ui.screens.LoginScreen
 import com.resqnet.app.ui.screens.MainScreen
 import com.resqnet.app.ui.screens.OtpScreen
+import com.resqnet.app.ui.screens.PhoneVerifyScreen
 import com.resqnet.app.ui.screens.RegisterScreen
 import com.resqnet.app.ui.screens.SplashScreen
 import kotlinx.coroutines.delay
@@ -23,7 +25,7 @@ import kotlinx.coroutines.launch
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
-private enum class Screen { Splash, Login, Register, Otp, Main }
+private enum class Screen { Splash, Login, Register, Otp, PhoneVerify, Main }
 
 @Composable
 fun ResQNetApp() {
@@ -37,6 +39,9 @@ fun ResQNetApp() {
     var authToken by remember { mutableStateOf(store.getAuthToken()) }
     var authBusy by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
+    var phoneCodeSent by remember { mutableStateOf(false) }
+    var demoPhoneOtp by remember { mutableStateOf<String?>(null) }
+    var firebaseVerificationId by remember { mutableStateOf<String?>(null) }
 
     // Push readiness must survive a sleeping free-tier server: read the FCM
     // token locally first, then retry the upload a few times with backoff.
@@ -78,7 +83,10 @@ fun ResQNetApp() {
         authToken = session.token
         authError = null
         scope.launch { syncFcmToken(session.token) }
-        screen = Screen.Main
+        phoneCodeSent = false
+        demoPhoneOtp = null
+        firebaseVerificationId = null
+        screen = if (session.user.phoneVerified) Screen.Main else Screen.PhoneVerify
     }
 
     // Accounts created before the app was connected are registered once, then the
@@ -96,6 +104,7 @@ fun ResQNetApp() {
                         user = remoteUser
                         store.saveUser(remoteUser)
                         store.loggedIn = true
+                        if (!remoteUser.phoneVerified) screen = Screen.PhoneVerify
                         syncFcmToken(savedToken)
                     } catch (error: ResQApiException) {
                         if (error.statusCode != 401) throw error
@@ -131,8 +140,9 @@ fun ResQNetApp() {
         Screen.Splash -> SplashScreen(onFinished = {
             screen = when {
                 store.loggedIn && store.getUser() != null && store.getAuthToken() != null -> {
-                    user = store.getUser()?.copy(password = "")
-                    Screen.Main
+                    val stored = store.getUser()?.copy(password = "")
+                    user = stored
+                    if (stored?.phoneVerified == false) Screen.PhoneVerify else Screen.Main
                 }
                 store.getUser() != null -> Screen.Login
                 else -> Screen.Register
@@ -222,6 +232,67 @@ fun ResQNetApp() {
                 }
             },
             onGoToRegister = { authError = null; screen = Screen.Register }
+        )
+
+        Screen.PhoneVerify -> PhoneVerifyScreen(
+            phone = user?.phone ?: "",
+            demoOtp = demoPhoneOtp,
+            codeSent = phoneCodeSent,
+            busy = authBusy,
+            serverError = authError,
+            onSendCode = { number ->
+                authBusy = true
+                authError = null
+                scope.launch {
+                    try {
+                        firebaseVerificationId = PhoneAuthHelper.sendCode(PhoneAuthHelper.activity(context), number)
+                        demoPhoneOtp = null
+                        phoneCodeSent = true
+                    } catch (firebaseError: Exception) {
+                        try {
+                            val code = authToken?.let { ResQApi.requestDemoPhoneOtp(it, number) }
+                            if (!code.isNullOrBlank()) {
+                                demoPhoneOtp = code
+                                firebaseVerificationId = null
+                                phoneCodeSent = true
+                                authError = null
+                            } else {
+                                authError = "Could not send code: ${firebaseError.message ?: "unknown error"}"
+                            }
+                        } catch (demoError: Exception) {
+                            authError = "Could not send code: ${demoError.message ?: firebaseError.message}"
+                        }
+                    } finally {
+                        authBusy = false
+                    }
+                }
+            },
+            onVerify = { code ->
+                authBusy = true
+                authError = null
+                scope.launch {
+                    try {
+                        val token = authToken ?: throw IllegalStateException("Account is not signed in")
+                        val verified = if (firebaseVerificationId != null && demoPhoneOtp == null) {
+                            val idToken = PhoneAuthHelper.idToken(firebaseVerificationId!!, code)
+                            ResQApi.verifyPhone(token, idToken)
+                        } else {
+                            ResQApi.confirmDemoPhoneOtp(token, code)
+                        }.copy(password = "")
+                        store.saveUser(verified)
+                        user = verified
+                        phoneCodeSent = false
+                        demoPhoneOtp = null
+                        firebaseVerificationId = null
+                        screen = Screen.Main
+                    } catch (error: Exception) {
+                        authError = error.message ?: "Verification failed."
+                    } finally {
+                        authBusy = false
+                    }
+                }
+            },
+            onSkip = { screen = Screen.Main }
         )
 
         Screen.Main -> MainScreen(

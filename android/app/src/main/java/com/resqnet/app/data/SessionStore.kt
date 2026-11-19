@@ -7,7 +7,8 @@ data class User(
     val email: String,
     val phone: String,
     val password: String,
-    val qualification: String
+    val qualification: String,
+    val phoneVerified: Boolean = false
 )
 
 /** Tiny SharedPreferences-backed store for the registered user and login session. */
@@ -21,6 +22,7 @@ class SessionStore(context: Context) {
             .putString("phone", user.phone)
             .putString("password", user.password)
             .putString("qualification", user.qualification)
+            .putBoolean("phone_verified", user.phoneVerified)
             .apply()
     }
 
@@ -31,7 +33,8 @@ class SessionStore(context: Context) {
             email = email,
             phone = prefs.getString("phone", "") ?: "",
             password = prefs.getString("password", "") ?: "",
-            qualification = prefs.getString("qualification", "CPR Volunteer") ?: "CPR Volunteer"
+            qualification = prefs.getString("qualification", "CPR Volunteer") ?: "CPR Volunteer",
+            phoneVerified = prefs.getBoolean("phone_verified", false)
         )
     }
 

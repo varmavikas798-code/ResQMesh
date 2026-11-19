@@ -14,7 +14,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 import firebase_admin
-from firebase_admin import credentials, messaging
+from firebase_admin import auth as fb_auth, credentials, messaging
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://resqmesh:resqmesh_demo@localhost:5432/resqmesh")
 if DATABASE_URL.startswith("postgresql://"):
@@ -56,6 +56,15 @@ class Verify(BaseModel):
     email: EmailStr
     otp: str = Field(pattern=r"^\d{6}$")
 
+class VerifyPhone(BaseModel):
+    id_token: str
+
+class DemoPhoneRequest(BaseModel):
+    phone: str = Field(pattern=r"^\+?\d{8,15}$")
+
+class DemoPhoneConfirm(BaseModel):
+    otp: str = Field(pattern=r"^\d{6}$")
+
 class Login(BaseModel):
     email: EmailStr
     password: str
@@ -89,6 +98,10 @@ def db():
           id UUID PRIMARY KEY, user_id UUID REFERENCES users(id), message TEXT NOT NULL,
           status TEXT NOT NULL DEFAULT 'active', location GEOGRAPHY(POINT,4326) NOT NULL,
           created_at TIMESTAMPTZ NOT NULL DEFAULT now())"""))
+        c.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN NOT NULL DEFAULT FALSE"))
+        c.execute(text("""CREATE TABLE IF NOT EXISTS phone_otps (
+          email TEXT PRIMARY KEY, code TEXT NOT NULL, phone TEXT NOT NULL,
+          expires_at TIMESTAMPTZ NOT NULL)"""))
         c.execute(text("CREATE INDEX IF NOT EXISTS users_location_gix ON users USING GIST(location)"))
         c.execute(text("CREATE INDEX IF NOT EXISTS alerts_location_gix ON alerts USING GIST(location)"))
     session = Session()
@@ -114,7 +127,7 @@ def current_user(authorization: str | None = Header(default=None)):
     except (JWTError, KeyError):
         raise HTTPException(401, "Invalid session")
     with db() as s:
-        user = s.execute(text("SELECT id,name,email,phone,qualification,available, ST_Y(location::geometry) lat, ST_X(location::geometry) lon FROM users WHERE id=:id AND verified"), {"id": uid}).mappings().first()
+        user = s.execute(text("SELECT id,name,email,phone,phone_verified,qualification,available, ST_Y(location::geometry) lat, ST_X(location::geometry) lon FROM users WHERE id=:id AND verified"), {"id": uid}).mappings().first()
     if not user: raise HTTPException(401, "Account not found")
     return dict(user)
 
@@ -144,16 +157,57 @@ def verify(body: Verify):
         p=row["payload"]; uid=uuid4()
         s.execute(text("INSERT INTO users(id,name,email,phone,password_hash,qualification,verified) VALUES(:id,:n,:e,:p,:h,:q,true)"), {"id":uid,"n":p["name"],"e":body.email.lower(),"p":p["phone"],"h":p["password"],"q":p["qualification"]})
         s.execute(text("DELETE FROM otps WHERE email=:e"), {"e":body.email.lower()})
-    return {"token":token(uid),"user":{"id":str(uid),"name":p["name"],"email":body.email.lower(),"phone":p["phone"],"qualification":p["qualification"]}}
+    return {"token":token(uid),"user":{"id":str(uid),"name":p["name"],"email":body.email.lower(),"phone":p["phone"],"phone_verified":False,"qualification":p["qualification"]}}
 
 @app.post("/auth/login")
 def login(body: Login):
-    with db() as s: row=s.execute(text("SELECT id,password_hash,name,email,phone,qualification FROM users WHERE email=:e AND verified"), {"e":body.email.lower()}).mappings().first()
+    with db() as s: row=s.execute(text("SELECT id,password_hash,name,email,phone,phone_verified,qualification FROM users WHERE email=:e AND verified"), {"e":body.email.lower()}).mappings().first()
     if not row or not pwd.verify(body.password,row["password_hash"]): raise HTTPException(401,"Incorrect email or password")
-    return {"token":token(row["id"]),"user":{k:row[k] for k in ("id","name","email","phone","qualification")}}
+    return {"token":token(row["id"]),"user":{k:row[k] for k in ("id","name","email","phone","phone_verified","qualification")}}
 
 @app.get("/me")
 def me(user=Depends(current_user)): return user
+
+def mark_phone_verified(uid: str, phone: str):
+    with db() as s:
+        if s.execute(text("SELECT 1 FROM users WHERE phone=:p AND id<>:id"), {"p":phone,"id":uid}).first():
+            raise HTTPException(409, "This phone number belongs to another account")
+        s.execute(text("UPDATE users SET phone=:p, phone_verified=true WHERE id=:id"), {"p":phone,"id":uid})
+    return {"ok": True, "phone": phone, "phone_verified": True}
+
+@app.post("/auth/verify-phone")
+def verify_phone(body: VerifyPhone, user=Depends(current_user)):
+    try:
+        decoded = fb_auth.verify_id_token(body.id_token)
+    except Exception:
+        raise HTTPException(400, "Phone verification code is invalid or expired")
+    phone = decoded.get("phone_number", "")
+    if not phone.startswith("+") or len(phone) < 8:
+        raise HTTPException(400, "Verification token has no phone number")
+    return mark_phone_verified(user["id"], phone)
+
+@app.post("/auth/verify-phone-demo/request")
+def demo_phone_request(body: DemoPhoneRequest, user=Depends(current_user)):
+    if os.getenv("DEMO_PHONE_VERIFY", "true").lower() not in ("1", "true", "yes"):
+        raise HTTPException(404, "Not found")
+    code = f"{random.randint(0,999999):06d}"
+    phone = body.phone if body.phone.startswith("+") else "+" + body.phone
+    with db() as s:
+        s.execute(text("""INSERT INTO phone_otps(email,code,phone,expires_at) VALUES(:e,:c,:p,now()+interval '10 minutes')
+          ON CONFLICT(email) DO UPDATE SET code=:c,phone=:p,expires_at=now()+interval '10 minutes'"""), {"e":user["email"],"c":code,"p":phone})
+    return {"ok": True, "demo_otp": code}
+
+@app.post("/auth/verify-phone-demo/confirm")
+def demo_phone_confirm(body: DemoPhoneConfirm, user=Depends(current_user)):
+    if os.getenv("DEMO_PHONE_VERIFY", "true").lower() not in ("1", "true", "yes"):
+        raise HTTPException(404, "Not found")
+    with db() as s:
+        row = s.execute(text("SELECT code,phone FROM phone_otps WHERE email=:e AND expires_at>now()"), {"e":user["email"]}).mappings().first()
+        if not row or row["code"] != body.otp:
+            raise HTTPException(400, "OTP invalid or expired")
+        phone = row["phone"]
+        s.execute(text("DELETE FROM phone_otps WHERE email=:e"), {"e":user["email"]})
+    return mark_phone_verified(user["id"], phone)
 
 @app.put("/responders/location")
 def set_location(body: Location, user=Depends(current_user)):
@@ -179,7 +233,7 @@ def update_fcm_token(body: FcmToken | None = None, legacy: str | None = Header(d
 @app.get("/responders/nearby")
 def nearby(lat: float, lon: float, radius_m: int=3000, user=Depends(current_user)):
     with db() as s:
-        rows=s.execute(text("""SELECT id,name,qualification,phone,ST_Y(location::geometry) latitude,ST_X(location::geometry) longitude,
+        rows=s.execute(text("""SELECT id,name,qualification,CASE WHEN phone_verified THEN phone ELSE '' END AS phone,ST_Y(location::geometry) latitude,ST_X(location::geometry) longitude,
           round((ST_Distance(location,ST_SetSRID(ST_MakePoint(:lon,:lat),4326)::geography)/1000)::numeric,2) distance_km
           FROM users WHERE verified AND available AND location IS NOT NULL AND id<>:uid
           AND ST_DWithin(location,ST_SetSRID(ST_MakePoint(:lon,:lat),4326)::geography,:radius) ORDER BY location <-> ST_SetSRID(ST_MakePoint(:lon,:lat),4326)::geography"""), {"lon":lon,"lat":lat,"radius":min(radius_m,10000),"uid":user["id"]}).mappings().all()
@@ -208,7 +262,7 @@ def create_sos(body: SOS, user=Depends(current_user)):
     aid=uuid4()
     with db() as s:
         s.execute(text("INSERT INTO alerts(id,user_id,message,location) VALUES(:id,:uid,:m,ST_SetSRID(ST_MakePoint(:lon,:lat),4326)::geography)"), {"id":aid,"uid":user["id"],"m":body.message,"lon":body.longitude,"lat":body.latitude})
-        responders=s.execute(text("""SELECT id,name,qualification,phone,fcm_token,ST_Y(location::geometry) latitude,ST_X(location::geometry) longitude,
+        responders=s.execute(text("""SELECT id,name,qualification,CASE WHEN phone_verified THEN phone ELSE '' END AS phone,fcm_token,ST_Y(location::geometry) latitude,ST_X(location::geometry) longitude,
           round((ST_Distance(location,ST_SetSRID(ST_MakePoint(:lon,:lat),4326)::geography)/1000)::numeric,2) distance_km
           FROM users WHERE verified AND available AND location IS NOT NULL AND id<>:uid
           AND ST_DWithin(location,ST_SetSRID(ST_MakePoint(:lon,:lat),4326)::geography,3000) ORDER BY location <-> ST_SetSRID(ST_MakePoint(:lon,:lat),4326)::geography"""), {"uid":user["id"],"lon":body.longitude,"lat":body.latitude}).mappings().all()
