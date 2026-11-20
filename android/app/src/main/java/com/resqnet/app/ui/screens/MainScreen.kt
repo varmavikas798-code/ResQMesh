@@ -14,6 +14,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
+import com.resqnet.app.data.ResQApiException
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import androidx.compose.foundation.Canvas
@@ -150,7 +151,8 @@ fun MainScreen(
     user: User,
     authToken: String?,
     accountSyncError: String?,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    onSessionExpired: () -> Unit
 ) {
     var tab by remember { mutableStateOf(Tab.Home) }
     val history = remember { mutableStateListOf<AlertRecord>() }
@@ -186,7 +188,8 @@ fun MainScreen(
                     accountSyncError = accountSyncError,
                     location = currentLocation,
                     onLocationChanged = { currentLocation = it },
-                    onSosSent = { history.add(0, it) }
+                    onSosSent = { history.add(0, it) },
+                    onSessionExpired = onSessionExpired
                 )
                 Tab.Responders -> RespondersTab(authToken = authToken, location = currentLocation)
                 Tab.History -> HistoryTab(history)
@@ -234,7 +237,8 @@ private fun HomeTab(
     accountSyncError: String?,
     location: Location?,
     onLocationChanged: (Location?) -> Unit,
-    onSosSent: (AlertRecord) -> Unit
+    onSosSent: (AlertRecord) -> Unit,
+    onSessionExpired: () -> Unit
 ) {
     val context = LocalContext.current
     var locationMessage by remember { mutableStateOf("Location permission is needed to get your current position.") }
@@ -304,7 +308,12 @@ private fun HomeTab(
                     ResponderCache.save(context, phones)
                 } catch (_: Exception) {}
             } catch (error: Exception) {
-                locationSyncMessage = "Offline — location saved on this phone, will sync when connected"
+                if (error is ResQApiException && error.statusCode == 401) {
+                    locationSyncMessage = "Session expired — please sign in again."
+                    onSessionExpired()
+                } else {
+                    locationSyncMessage = "Offline — location saved on this phone, will sync when connected"
+                }
             }
         }
     }

@@ -313,6 +313,11 @@ fun ResQNetApp() {
             onLogout = {
                 store.logout()
                 screen = Screen.Login
+            },
+            onSessionExpired = {
+                authError = "Session expired — please sign in again."
+                store.logout()
+                screen = Screen.Login
             }
         )
     }
