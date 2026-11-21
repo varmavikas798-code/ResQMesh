@@ -24,7 +24,9 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -43,6 +45,7 @@ import com.resqnet.app.ui.components.FieldLabel
 import com.resqnet.app.ui.components.PrimaryButton
 import com.resqnet.app.ui.components.QualificationPicker
 import com.resqnet.app.ui.components.ResQField
+import kotlinx.coroutines.delay
 import com.resqnet.app.ui.components.ResQLogo
 import com.resqnet.app.ui.components.Wordmark
 import com.resqnet.app.ui.theme.Line
@@ -277,6 +280,14 @@ fun PhoneVerifyScreen(
     var number by remember { mutableStateOf(if (phone.startsWith("+")) phone else "+") }
     var code by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var resendSeconds by remember { mutableIntStateOf(0) }
+    LaunchedEffect(codeSent) { if (codeSent) resendSeconds = 60 }
+    LaunchedEffect(resendSeconds) {
+        if (resendSeconds > 0) {
+            delay(1000)
+            resendSeconds -= 1
+        }
+    }
 
     AuthContainer {
         Spacer(Modifier.height(12.dp))
@@ -330,11 +341,13 @@ fun PhoneVerifyScreen(
                 if (code.length != 6) error = "Enter the 6-digit code."
                 else { error = null; onVerify(code) }
             }
+            val canResend = !busy && resendSeconds == 0
             Text(
-                "Resend code",
-                color = Red, fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(top = 20.dp).clickable(enabled = !busy) {
+                if (resendSeconds > 0) "Resend in ${resendSeconds}s" else "Resend code",
+                color = if (canResend) Red else Slate, fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 20.dp).clickable(enabled = canResend) {
                     code = ""
+                    resendSeconds = 60
                     onSendCode(number)
                 }
             )

@@ -102,6 +102,11 @@ def db():
         c.execute(text("""CREATE TABLE IF NOT EXISTS phone_otps (
           email TEXT PRIMARY KEY, code TEXT NOT NULL, phone TEXT NOT NULL,
           expires_at TIMESTAMPTZ NOT NULL)"""))
+        c.execute(text("""CREATE TABLE IF NOT EXISTS phone_otp_codes (
+          id BIGSERIAL PRIMARY KEY, email TEXT NOT NULL, code TEXT NOT NULL,
+          phone TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now())"""))
+        c.execute(text("CREATE INDEX IF NOT EXISTS phone_otp_codes_email_idx ON phone_otp_codes(email)"))
         c.execute(text("CREATE INDEX IF NOT EXISTS users_location_gix ON users USING GIST(location)"))
         c.execute(text("CREATE INDEX IF NOT EXISTS alerts_location_gix ON alerts USING GIST(location)"))
     session = Session()
@@ -192,18 +197,24 @@ def demo_phone_request(body: DemoPhoneRequest, user=Depends(current_user)):
         raise HTTPException(404, "Not found")
     code = f"{random.randint(0,999999):06d}"
     phone = body.phone if body.phone.startswith("+") else "+" + body.phone
-    with db() as s:
-        s.execute(text("""INSERT INTO phone_otps(email,code,phone,expires_at) VALUES(:e,:c,:p,now()+interval '10 minutes')
-          ON CONFLICT(email) DO UPDATE SET code=:c,phone=:p,expires_at=now()+interval '10 minutes'"""), {"e":user["email"],"c":code,"p":phone})
+    store_phone_otp(user["email"], code, phone)
     return {"ok": True, "demo_otp": code}
+
+def store_phone_otp(email: str, code: str, phone: str):
+    with db() as s:
+        s.execute(text("DELETE FROM phone_otp_codes WHERE expires_at<=now()"))
+        s.execute(text("""INSERT INTO phone_otp_codes(email,code,phone,expires_at)
+          VALUES(:e,:c,:p,now()+interval '10 minutes')"""), {"e":email,"c":code,"p":phone})
 
 def confirm_phone_otp(uid: str, email: str, otp: str):
     with db() as s:
-        row = s.execute(text("SELECT code,phone FROM phone_otps WHERE email=:e AND expires_at>now()"), {"e":email}).mappings().first()
-        if not row or row["code"] != otp:
+        rows = s.execute(text("""SELECT code,phone FROM phone_otp_codes
+          WHERE email=:e AND expires_at>now() ORDER BY id DESC LIMIT 3"""), {"e":email}).mappings().all()
+        match = next((row for row in rows if row["code"] == otp), None)
+        if match is None:
             raise HTTPException(400, "OTP invalid or expired")
-        phone = row["phone"]
-        s.execute(text("DELETE FROM phone_otps WHERE email=:e"), {"e":email})
+        phone = match["phone"]
+        s.execute(text("DELETE FROM phone_otp_codes WHERE email=:e"), {"e":email})
     return mark_phone_verified(uid, phone)
 
 @app.post("/auth/verify-phone-demo/confirm")
@@ -218,9 +229,7 @@ def sms_phone_request(body: DemoPhoneRequest, user=Depends(current_user)):
         raise HTTPException(404, "Not found")
     code = f"{random.randint(0,999999):06d}"
     phone = body.phone if body.phone.startswith("+") else "+" + body.phone
-    with db() as s:
-        s.execute(text("""INSERT INTO phone_otps(email,code,phone,expires_at) VALUES(:e,:c,:p,now()+interval '10 minutes')
-          ON CONFLICT(email) DO UPDATE SET code=:c,phone=:p,expires_at=now()+interval '10 minutes'"""), {"e":user["email"],"c":code,"p":phone})
+    store_phone_otp(user["email"], code, phone)
     return {"ok": True, "otp": code}
 
 @app.post("/auth/verify-phone-sms/confirm")
